@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Restaurant Dashboard — FoodCourt</title>
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧑‍🍳</text></svg>">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- QR Code library -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+</head>
+
+<body>
+
+    <nav class="navbar navbar-expand-lg">
+        <div class="container-fluid px-4">
+            <a class="navbar-brand" href="/">🍽️ Food<span>Court</span> <small
+                    style="font-size:.65rem;color:var(--text-muted);-webkit-text-fill-color:var(--text-muted)">Restaurant
+                    Panel</small></a>
+            <div class="ms-auto d-flex align-items-center gap-3">
+                <span id="rest-name-nav" style="color:var(--text-muted);font-size:.9rem"></span>
+                <button class="btn-outline-custom" onclick="logout()" style="padding:.4rem 1rem;font-size:.85rem">
+                    <i class="bi bi-box-arrow-right"></i> Logout
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-12 col-md-2 p-0">
+                <div class="sidebar">
+                    <a class="sidebar-link active" href="#" onclick="showSection('orders')">
+                        <i class="bi bi-bag-check"></i> Orders
+                    </a>
+                    <a class="sidebar-link" href="#" onclick="showSection('menu')">
+                        <i class="bi bi-menu-button-wide"></i> Menu
+                    </a>
+                    <a class="sidebar-link" href="#" onclick="showSection('tables')">
+                        <i class="bi bi-qr-code"></i> Tables & QR
+                    </a>
+                    <a class="sidebar-link" href="#" onclick="showSection('stats')">
+                        <i class="bi bi-bar-chart"></i> Stats
+                    </a>
+                    <a class="sidebar-link" href="#" onclick="showSection('reviews')">
+                        <i class="bi bi-star"></i> Reviews
+                    </a>
+                    <a class="sidebar-link" href="#" onclick="showSection('offers')">
+                        <i class="bi bi-tags"></i> Offers
+                    </a>
+                </div>
+            </div>
+
+            <!-- Main content -->
+            <div class="col-12 col-md-10 p-4">
+
+                <!-- Stats -->
+                <div id="section-stats" style="display:none">
+                    <h2 class="section-title mb-1">Dashboard</h2>
+                    <p class="section-subtitle">Overview of your restaurant performance</p>
+                    <div class="row g-3 mb-5" id="stats-row">
+                        <div class="col-6 col-lg-3">
+                            <div class="stat-card">
+                                <div class="stat-icon orange"><i class="bi bi-bag"></i></div>
+                                <div>
+                                    <div class="stat-value" id="s-total">—</div>
+                                    <div class="stat-label">Total Orders</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                            <div class="stat-card">
+                                <div class="stat-icon gold"><i class="bi bi-currency-dollar"></i></div>
+                                <div>
+                                    <div class="stat-value" id="s-revenue">—</div>
+                                    <div class="stat-label">Revenue</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                            <div class="stat-card">
+                                <div class="stat-icon blue"><i class="bi bi-clock"></i></div>
+                                <div>
+                                    <div class="stat-value" id="s-pending">—</div>
+                                    <div class="stat-label">Pending</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 col-lg-3">
+                            <div class="stat-card">
+                                <div class="stat-icon green"><i class="bi bi-fire"></i></div>
+                                <div>
+                                    <div class="stat-value" id="s-preparing">—</div>
+                                    <div class="stat-label">Preparing</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Revenue Graph -->
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <div class="fc-card p-4">
+                                <h5 class="mb-4" style="color:var(--text-primary);font-weight:700">7-Day Revenue</h5>
+                                <canvas id="revenueChart" height="100"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Orders section -->
+                <div id="section-orders">
+                    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                        <h2 class="section-title mb-0">Incoming Orders</h2>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <select class="fc-input" id="status-filter" style="width:auto;padding:.4rem .9rem"
+                                onchange="loadOrders()">
+                                <option value="">All Statuses</option>
+                                <option value="pending">Pending</option>
+                                <option value="accepted">Accepted</option>
+                                <option value="preparing">Preparing</option>
+                                <option value="ready">Ready</option>
+                                <option value="delivered">Delivered</option>
+                                <option value="rejected">Rejected</option>
+                            </select>
+                            <button class="btn-outline-custom" style="padding:.4rem 1rem;font-size:.85rem"
+                                onclick="loadOrders()">
+                                <i class="bi bi-arrow-clockwise"></i> Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="fc-table">
+                            <thead>
+                                <tr>
+                                    <th>Order ID</th>
+                                    <th>Table / Type</th>
+                                    <th>Items</th>
+                                    <th>Total</th>
+                                    <th>Status</th>
+                                    <th>Date</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="orders-tbody">
+                                <tr>
+                                    <td colspan="7" class="text-center" style="color:var(--text-muted);padding:2rem">
+                                        Loading…</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Menu section (hidden by default) -->
+                <div id="section-menu" style="display:none">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h2 class="section-title mb-0">Menu Items</h2>
+                        <button class="btn-primary-custom" onclick="openAddModal()"><i class="bi bi-plus-lg"></i> Add
+                            Item</button>
+                    </div>
+                    <div class="row g-3" id="menu-grid"></div>
+                </div>
+
+                <!-- Tables & QR section (hidden) -->
+                <div id="section-tables" style="display:none">
+                    <h2 class="section-title mb-1"><i class="bi bi-qr-code"></i> Tables & QR Codes</h2>
+                    <p class="section-subtitle">Generate QR codes for your restaurant tables. Customers scan them to
+                        order directly from their table.</p>
+
+                    <!-- Add tables form -->
+                    <div class="fc-card p-4 mb-4" style="max-width:500px">
+                        <h5 style="font-weight:700;margin-bottom:1rem">Add Tables</h5>
+                        <div class="d-flex gap-2 align-items-end">
+                            <div style="flex:1">
+                                <label class="fc-label">Number of Tables</label>
+                                <input type="number" class="fc-input" id="add-table-count" value="1" min="1" max="50">
+                            </div>
+                            <button class="btn-primary-custom" onclick="generateTables()"
+                                style="height:fit-content;white-space:nowrap">
+                                <i class="bi bi-plus-lg"></i> Generate
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Existing tables grid -->
+                    <div class="row g-3" id="tables-grid">
+                        <div class="col-12 text-center py-4" style="color:var(--text-muted)">Loading tables…</div>
+                    </div>
+                </div>
+
+                <!-- Reviews section (hidden) -->
+                <div id="section-reviews" style="display:none">
+                    <h2 class="section-title mb-3">Customer Reviews</h2>
+                    <div id="reviews-container" class="row g-3">
+                        <div class="col-12 text-center" style="color:var(--text-muted);padding:2rem">Loading reviews...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Offers section (hidden) -->
+                <div id="section-offers" style="display:none">
+                    <h2 class="section-title mb-1">Manage Offers</h2>
+                    <p class="section-subtitle mb-4">Set a promotional offer to attract more customers</p>
+                    <div class="fc-card p-4 mx-auto" style="max-width:500px">
+                        <div class="mb-3">
+                            <label class="fc-label">Current Offer</label>
+                            <input type="text" id="offer-input" class="fc-input"
+                                placeholder="e.g. 20% OFF on all pizzas!">
+                        </div>
+                        <button class="btn-primary-custom w-100" onclick="saveOffer()">Update Offer</button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Menu Item Modal -->
+    <div class="modal fade" id="menuModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content"
+                style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)">
+                <div class="modal-header" style="border-color:var(--border)">
+                    <h5 class="modal-title" id="modal-title">Add Menu Item</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="menu-form" enctype="multipart/form-data">
+                        <input type="hidden" id="edit-item-id">
+                        <div class="mb-3">
+                            <label class="fc-label">Item Name</label>
+                            <input type="text" class="fc-input" id="item-name" placeholder="e.g. Margherita Pizza"
+                                required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="fc-label">Price ($)</label>
+                            <input type="number" class="fc-input" id="item-price" placeholder="0.00" step="0.01"
+                                min="0" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="fc-label">Item Image (optional)</label>
+                            <input type="file" class="fc-input" id="item-image" accept="image/*" style="padding:.5rem">
+                        </div>
+                        <div class="mb-3">
+                            <label class="d-flex align-items-center gap-2" style="cursor:pointer">
+                                <input type="checkbox" id="item-available" checked
+                                    style="width:18px;height:18px;accent-color:var(--primary)">
+                                <span class="fc-label" style="margin:0">Available for ordering</span>
+                            </label>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer" style="border-color:var(--border)">
+                    <button class="btn-outline-custom" data-bs-dismiss="modal">Cancel</button>
+                    <button class="btn-primary-custom" id="save-item-btn" onclick="saveMenuItem()">
+                        <i class="bi bi-check-lg"></i> Save
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="fc-toast-container" id="toast-container"></div>
+
+    <!-- Notification sound for new orders -->
+    <audio id="notification-sound" preload="auto">
+        <source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgfYyXi3VRPk1ri5yUgWY/OlZ0iZiUg2hDO1N0iZqTg2pDP1J2ipuUg2xFQFJ3i5yVg25HQlN4jJ2Wg3BJRFN5jZ6Xg3JLRlN6jp+Yg3RNSFR7j6CZg3ZPSlR8kKGag3hRTFR9kaKbg3pTTlV+kqOcg3xVUFV/k6Sdg35XUVZ/lKWeg4BZU1aAlaaeg4FaVFeBlamfg4NcVleCl6qgg4VeV1iDmKuhg4dgWViEmqyig4liW1mFm62jg4tkXFmGnK6kg41mXlqHnq+lg49oX1uIn7Cmg5FqYVuJoLGng5NsY1yKobKog5VuZVyLo7Opg5dwZl2MpLSqg5lyaF6NpbWrg5t0aV6Op7asg510a1+PqLerg590bF+QqLisg6F2bWCRqbmtg6N4b2GSq7qug6V6cGGTrLuvg6d8cmKUrbywg6l+c2OVr72xg6uAd2SWsL6zg62CeGaYsr+0g6+EemeZs8C1g7GGfGibtMG2g7OIf2mct8K3g7WKgWqduMO4g7eMg2ufucS6g7mOhWyhusW7g7uQh26ivca8g72Sim+jv8e9g7+UjHClwci+g8GWjnGnwsm/g8OYkHOow8rAg8Wak3SpxcvBg8ecl3arxczCg8melnnsx83Dg8qgnHrvyM7Fg8yioX7wy9DGg86kpIHxzdHHg9CmpoLzz9LJg9KoqYT00dTKg9Sqq4X11tXLg9asrofy2NfNg9iusoj02djOg9qwtIr12tvQg9yytozy3NzRg96zu4/04N7Tg+C1v5H15+DUg+K3wZP26eHWg+S5xJb37OPYg+a7x5j48OXag+i9ypv59ujcg+q/zZ768+rig+zB0KH79u3lg+7D06T8+e/ng/DF1qb9/PHpg/LH2ar+//Trg/A=" type="audio/wav">
+    </audio>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/main.js?v=3"></script>
+    <script src="/static/js/restaurant.js?v=3"></script>
+    <script>
+        if (!getToken() || getRole() !== 'restaurant') { window.location.href = '/restaurant_auth.html'; }
+        document.getElementById('rest-name-nav').textContent = localStorage.getItem('fc_name') || '';
+
+        function logout() { localStorage.clear(); window.location.href = '/restaurant_auth.html'; }
+
+        function showSection(name) {
+            const sections = ['orders', 'menu', 'stats', 'reviews', 'offers', 'tables'];
+            sections.forEach(s => {
+                const el = document.getElementById('section-' + s);
+                if (el) el.style.display = s === name ? '' : 'none';
+            });
+            document.querySelectorAll('.sidebar-link').forEach((el, i) => {
+                el.classList.toggle('active', sections[i] === name);
+            });
+            if (name === 'menu') loadMenu();
+            if (name === 'stats') { loadDashboard(); loadRevenueGraph(); }
+            if (name === 'reviews') loadReviews();
+            if (name === 'tables') loadTables();
+        }
+
+        loadDashboard();
+        loadOrders();
+        // Polling every 10 seconds for new orders
+        setInterval(loadOrders, 10000);
+    </script>
+</body>
+
+</html>

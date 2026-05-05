@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FoodCourt — Order From Your Favourite Restaurants</title>
+    <meta name="description"
+        content="FoodCourt is a modern food ordering platform. Browse restaurants, view menus, and get food delivered fast.">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍔</text></svg>">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+
+<body>
+
+    <!-- NAVBAR -->
+    <nav class="navbar navbar-expand-lg">
+        <div class="container">
+            <a class="navbar-brand" href="/">🍽️ Food<span>Court</span></a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="mainNav">
+                <ul class="navbar-nav ms-auto align-items-center gap-1">
+                    <li class="nav-item"><a class="nav-link active" href="/">Home</a></li>
+                    <li class="nav-item" id="nav-orders" style="display:none">
+                        <a class="nav-link" href="/orders.html"><i class="bi bi-bag-check"></i> My Orders</a>
+                    </li>
+                    <!-- Auth links (shown when logged out) -->
+                    <li class="nav-item" id="nav-login">
+                        <a class="nav-link" href="/login.html">Login</a>
+                    </li>
+                    <li class="nav-item" id="nav-register">
+                        <a class="btn-primary-custom" href="/register.html"
+                            style="font-size:0.9rem; padding:0.5rem 1.2rem;">Sign Up</a>
+                    </li>
+                    <!-- Logged-in user menu -->
+                    <li class="nav-item dropdown" id="nav-user" style="display:none">
+                        <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> <span id="nav-username">User</span>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end"
+                            style="background:var(--surface);border-color:var(--border)">
+                            <li><a class="dropdown-item" style="color:var(--text-muted)" href="/orders.html"><i
+                                        class="bi bi-bag me-2"></i>My Orders</a></li>
+                            <li>
+                                <hr class="dropdown-divider" style="border-color:var(--border)">
+                            </li>
+                            <li><a class="dropdown-item" style="color:var(--text-muted)" href="#" id="logout-btn"><i
+                                        class="bi bi-box-arrow-right me-2"></i>Logout</a></li>
+                        </ul>
+                    </li>
+                    <!-- Restaurant / Admin quick links -->
+                    <li class="nav-item">
+                        <a class="nav-link" href="/restaurant_auth.html"><i class="bi bi-shop"></i> Restaurant</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/admin_login.html"><i class="bi bi-shield-lock"></i> Admin</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- HERO -->
+    <section class="hero">
+        <div class="hero-bg-shapes">
+            <div class="shape shape-1"></div>
+            <div class="shape shape-2"></div>
+            <div class="shape shape-3"></div>
+        </div>
+        <div class="container position-relative" style="z-index:1">
+            <div class="row align-items-center">
+                <div class="col-lg-7">
+                    <div class="hero-badge">🔥 #1 Food Court Platform</div>
+                    <h1>Discover & Order <span>Delicious Food</span> Instantly</h1>
+                    <p class="hero-desc">From your favourite restaurants — delivered to your door or served fresh at your table.</p>
+
+                    <!-- ★ MODE TOGGLE: Delivery / Dine-In -->
+                    <div class="mode-toggle-wrapper">
+                        <div class="mode-toggle" id="mode-toggle">
+                            <button class="mode-btn active" id="mode-delivery" onclick="setMode('delivery')">
+                                <i class="bi bi-truck"></i> Delivery
+                            </button>
+                            <button class="mode-btn" id="mode-dinein" onclick="setMode('dinein')">
+                                <i class="bi bi-shop-window"></i> Dine-In
+                            </button>
+                            <div class="mode-slider" id="mode-slider"></div>
+                        </div>
+                    </div>
+
+                    <!-- DELIVERY MODE: Search -->
+                    <div id="delivery-section">
+                        <div class="search-wrapper position-relative">
+                            <i class="bi bi-search ms-3" style="color:var(--text-muted)"></i>
+                            <input type="text" id="search-input" placeholder="Search restaurants, dishes…"
+                                autocomplete="off">
+                            <button class="btn-primary-custom" onclick="triggerSearch()"><i class="bi bi-search"></i>
+                                Search</button>
+                            <div id="search-suggestions" class="search-suggestions"></div>
+                        </div>
+                        <!-- Category pills -->
+                        <div class="category-pills mt-4">
+                            <span class="pill active" onclick="filterCuisine(this, '')">🍽️ All</span>
+                            <span class="pill" onclick="filterCuisine(this, 'Italian')">🍕 Italian</span>
+                            <span class="pill" onclick="filterCuisine(this, 'American')">🍔 American</span>
+                            <span class="pill" onclick="filterCuisine(this, 'Japanese')">🍣 Japanese</span>
+                            <span class="pill" onclick="filterCuisine(this, 'Chinese')">🥡 Chinese</span>
+                            <span class="pill" onclick="filterCuisine(this, 'Indian')">🍛 Indian</span>
+                            <span class="pill" onclick="filterCuisine(this, 'Mexican')">🌮 Mexican</span>
+                        </div>
+                    </div>
+
+                    <!-- DINE-IN MODE: Scan QR / Reserve -->
+                    <div id="dinein-section" style="display:none">
+                        <p class="dinein-subtitle">Choose how you'd like to dine</p>
+                        <div class="dinein-options">
+                            <div class="dinein-card" onclick="openQrScanner()">
+                                <div class="dinein-card-icon">
+                                    <i class="bi bi-qr-code-scan"></i>
+                                </div>
+                                <h3>Scan QR Code</h3>
+                                <p>Scan the QR code on your table to browse the menu & order instantly</p>
+                                <span class="dinein-card-action">Scan Now <i class="bi bi-arrow-right"></i></span>
+                            </div>
+                            <div class="dinein-card" onclick="document.getElementById('table-url-section').style.display=''">
+                                <div class="dinein-card-icon reserve">
+                                    <i class="bi bi-calendar-check"></i>
+                                </div>
+                                <h3>Enter Table Link</h3>
+                                <p>Got a table URL? Paste it here to start ordering from your table</p>
+                                <span class="dinein-card-action">Enter Link <i class="bi bi-arrow-right"></i></span>
+                            </div>
+                        </div>
+                        <!-- Manual URL entry -->
+                        <div id="table-url-section" style="display:none" class="mt-4">
+                            <div class="search-wrapper">
+                                <i class="bi bi-link-45deg ms-3" style="color:var(--text-muted)"></i>
+                                <input type="text" id="table-url-input" placeholder="Paste your table URL here…">
+                                <button class="btn-primary-custom" onclick="goToTableUrl()"><i class="bi bi-arrow-right"></i> Go</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-5 d-none d-lg-flex justify-content-center">
+                    <div class="hero-visual">
+                        <div class="hero-food-circle">
+                            <span class="food-emoji e1">🍕</span>
+                            <span class="food-emoji e2">🍔</span>
+                            <span class="food-emoji e3">🍣</span>
+                            <span class="food-emoji e4">🌮</span>
+                            <span class="food-emoji e5">🍜</span>
+                            <span class="food-emoji e6">🥗</span>
+                            <div class="hero-center-icon">🍽️</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- RESTAURANTS GRID (Delivery mode) -->
+    <section class="py-5" id="restaurants-section">
+        <div class="container">
+            <div class="d-flex align-items-center justify-content-between mb-4">
+                <div>
+                    <h2 class="section-title">Top Restaurants</h2>
+                    <p class="section-subtitle mb-0">Handpicked for you — fresh, hot, and ready</p>
+                </div>
+            </div>
+            <div class="row g-4" id="restaurants-grid">
+                <!-- Skeletons -->
+                <div class="col-12 col-sm-6 col-lg-4" id="skel-1">
+                    <div class="fc-card">
+                        <div class="skeleton" style="height:200px"></div>
+                        <div class="card-body">
+                            <div class="skeleton" style="height:1.2rem;width:60%;margin-bottom:.5rem"></div>
+                            <div class="skeleton" style="height:.9rem;width:40%"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 col-sm-6 col-lg-4" id="skel-2">
+                    <div class="fc-card">
+                        <div class="skeleton" style="height:200px"></div>
+                        <div class="card-body">
+                            <div class="skeleton" style="height:1.2rem;width:60%;margin-bottom:.5rem"></div>
+                            <div class="skeleton" style="height:.9rem;width:40%"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 col-sm-6 col-lg-4" id="skel-3">
+                    <div class="fc-card">
+                        <div class="skeleton" style="height:200px"></div>
+                        <div class="card-body">
+                            <div class="skeleton" style="height:1.2rem;width:60%;margin-bottom:.5rem"></div>
+                            <div class="skeleton" style="height:.9rem;width:40%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CART FLOATING BUTTON -->
+    <div class="cart-btn-floating" id="cart-fab" style="display:none">
+        <button class="btn-primary-custom position-relative"
+            style="width:60px;height:60px;border-radius:50%;padding:0;justify-content:center;font-size:1.4rem"
+            data-bs-toggle="offcanvas" data-bs-target="#cartSidebar">
+            🛒
+            <span class="cart-count" id="cart-badge">0</span>
+        </button>
+    </div>
+
+    <!-- CART SIDEBAR -->
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="cartSidebar">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title">🛒 Your Cart</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+        </div>
+        <div class="offcanvas-body d-flex flex-column" style="overflow-y:auto">
+            <div id="cart-items-list" class="flex-grow-1"></div>
+            <div id="cart-footer"
+                style="display:none; border-top:1px solid var(--border); padding-top:1rem; margin-top:1rem;">
+                <div class="d-flex justify-content-between mb-2">
+                    <span style="color:var(--text-muted)">Subtotal</span>
+                    <strong id="cart-total">$0.00</strong>
+                </div>
+                <div class="mb-3">
+                    <label class="fc-label">Delivery Address</label>
+                    <textarea class="fc-input" id="cart-address" rows="2"
+                        placeholder="Enter your delivery address…"></textarea>
+                </div>
+                <button class="btn-primary-custom w-100 justify-content-center" onclick="checkout()">
+                    <i class="bi bi-check-circle"></i> Place Order
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- QR SCANNER MODAL -->
+    <div class="modal fade" id="qrScannerModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius)">
+                <div class="modal-header border-0 pb-0">
+                    <h5 class="modal-title" style="font-weight:700"><i class="bi bi-qr-code-scan"></i> Scan QR Code</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center py-4">
+                    <div class="qr-scanner-box">
+                        <div class="qr-scanner-frame">
+                            <div class="qr-corner tl"></div>
+                            <div class="qr-corner tr"></div>
+                            <div class="qr-corner bl"></div>
+                            <div class="qr-corner br"></div>
+                            <div class="qr-scan-line"></div>
+                            <i class="bi bi-qr-code" style="font-size:3rem;opacity:0.2"></i>
+                        </div>
+                    </div>
+                    <p class="mt-3" style="color:var(--text-muted);font-size:0.95rem">
+                        Point your camera at the QR code on your table
+                    </p>
+                    <div class="mt-3">
+                        <p style="color:var(--text-muted);font-size:0.82rem">Or enter the table URL manually:</p>
+                        <div class="d-flex gap-2">
+                            <input type="text" class="fc-input" id="qr-manual-url" placeholder="Paste table URL…" style="flex:1">
+                            <button class="btn-primary-custom" onclick="goToManualUrl()" style="white-space:nowrap">
+                                <i class="bi bi-arrow-right"></i> Go
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST CONTAINER -->
+    <div class="fc-toast-container" id="toast-container"></div>
+
+    <!-- FOOTER -->
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div class="navbar-brand d-inline-block mb-2">🍽️ FoodCourt</div>
+                <p>© 2024 FoodCourt — Built with ❤️ and 🍕</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/main.js?v=3"></script>
+    <script src="/static/js/customer.js?v=3"></script>
+    <script>
+        initNavbar();
+        loadRestaurants();
+        renderCart();
+
+        function triggerSearch() {
+            const q = document.getElementById('search-input').value.trim();
+            loadRestaurants(q, currentCuisine);
+            document.getElementById('search-suggestions').classList.remove('active');
+        }
+
+        let currentCuisine = '';
+        function filterCuisine(el, cuisine) {
+            document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+            el.classList.add('active');
+            currentCuisine = cuisine;
+            const q = document.getElementById('search-input').value.trim();
+            loadRestaurants(q, cuisine);
+        }
+
+        // ── Mode Toggle ────────────────────────────
+        let currentMode = 'delivery';
+
+        function setMode(mode) {
+            currentMode = mode;
+            const deliveryBtn = document.getElementById('mode-delivery');
+            const dineinBtn = document.getElementById('mode-dinein');
+            const slider = document.getElementById('mode-slider');
+            const deliverySec = document.getElementById('delivery-section');
+            const dineinSec = document.getElementById('dinein-section');
+            const restSection = document.getElementById('restaurants-section');
+
+            if (mode === 'delivery') {
+                deliveryBtn.classList.add('active');
+                dineinBtn.classList.remove('active');
+                slider.style.transform = 'translateX(0)';
+                deliverySec.style.display = '';
+                dineinSec.style.display = 'none';
+                restSection.style.display = '';
+            } else {
+                deliveryBtn.classList.remove('active');
+                dineinBtn.classList.add('active');
+                slider.style.transform = 'translateX(100%)';
+                deliverySec.style.display = 'none';
+                dineinSec.style.display = '';
+                restSection.style.display = 'none';
+            }
+        }
+
+        // ── QR Scanner ─────────────────────────────
+        function openQrScanner() {
+            new bootstrap.Modal(document.getElementById('qrScannerModal')).show();
+        }
+
+        function goToManualUrl() {
+            const url = document.getElementById('qr-manual-url').value.trim();
+            if (url) window.location.href = url;
+            else showToast('Please enter a valid table URL', 'error');
+        }
+
+        function goToTableUrl() {
+            const url = document.getElementById('table-url-input').value.trim();
+            if (url) window.location.href = url;
+            else showToast('Please enter a valid table URL', 'error');
+        }
+    </script>
+</body>
+
+</html>

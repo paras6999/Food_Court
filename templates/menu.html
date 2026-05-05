@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Menu — FoodCourt</title>
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+
+<body>
+
+    <!-- NAVBAR -->
+    <nav class="navbar navbar-expand-lg">
+        <div class="container">
+            <a class="navbar-brand" href="/">🍽️ Food<span>Court</span></a>
+            <div class="ms-auto d-flex align-items-center gap-2">
+                <a href="/" class="nav-link"><i class="bi bi-arrow-left"></i> Back</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- RESTAURANT HEADER -->
+    <div id="rest-header"
+        style="background:linear-gradient(135deg,#1a1a2e,#16213e);padding:2.5rem 0;border-bottom:1px solid var(--border)">
+        <div class="container">
+            <div class="d-flex align-items-center gap-4 flex-wrap">
+                <img id="rest-img" src="" alt=""
+                    style="width:110px;height:110px;border-radius:var(--radius);object-fit:cover;border:2px solid var(--border)">
+                <div>
+                    <h1 id="rest-name" class="section-title mb-1">Loading…</h1>
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <span id="rest-cuisine" class="badge-cuisine"></span>
+                        <span id="rest-rating" class="stars"></span>
+                    </div>
+                    <!-- Offer banner -->
+                    <div id="offer-banner" class="offer-banner mt-3" style="display:none">
+                        <i class="bi bi-tags-fill"></i> <span id="offer-text"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MENU ITEMS -->
+    <section class="py-5">
+        <div class="container">
+            <div class="row g-3" id="menu-grid">
+                <div class="col-12 text-center py-5" style="color:var(--text-muted)">
+                    <div class="spinner-border text-warning"></div>
+                    <p class="mt-2">Loading menu…</p>
+                </div>
+            </div>
+
+            <!-- Reviews Section -->
+            <div class="mt-5">
+                <h2 class="section-title" style="font-size:1.4rem">⭐ Reviews</h2>
+                <div id="reviews-list" class="mt-3"></div>
+                <!-- Leave a review form (shown only when logged in as customer) -->
+                <div id="review-form-wrapper" style="display:none" class="mt-4">
+                    <div
+                        style="background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem">
+                        <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:1rem">Leave a Review</h3>
+                        <div class="mb-3">
+                            <label class="fc-label">Rating</label>
+                            <div class="d-flex gap-2" id="star-picker" style="font-size:1.5rem;cursor:pointer">
+                                <span onclick="setRating(1)">☆</span><span onclick="setRating(2)">☆</span>
+                                <span onclick="setRating(3)">☆</span><span onclick="setRating(4)">☆</span><span
+                                    onclick="setRating(5)">☆</span>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="fc-label">Comment (optional)</label>
+                            <textarea class="fc-input" id="review-comment" rows="2"
+                                placeholder="Share your experience…"></textarea>
+                        </div>
+                        <button class="btn-primary-custom" onclick="submitReview()">
+                            <i class="bi bi-send"></i> Submit Review
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FLOATING CART -->
+    <div class="cart-btn-floating" id="cart-fab" style="display:none">
+        <button class="btn-primary-custom position-relative"
+            style="width:60px;height:60px;border-radius:50%;padding:0;justify-content:center;font-size:1.4rem"
+            data-bs-toggle="offcanvas" data-bs-target="#cartSidebar">
+            🛒
+            <span class="cart-count" id="cart-badge">0</span>
+        </button>
+    </div>
+
+    <!-- CART SIDEBAR -->
+    <div class="offcanvas offcanvas-end" tabindex="-1" id="cartSidebar">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title">🛒 Your Cart</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+        </div>
+        <div class="offcanvas-body d-flex flex-column" style="overflow-y:auto">
+            <div id="cart-items-list" class="flex-grow-1"></div>
+            <div id="cart-footer"
+                style="display:none;border-top:1px solid var(--border);padding-top:1rem;margin-top:1rem">
+                <div class="d-flex justify-content-between mb-2">
+                    <span style="color:var(--text-muted)">Subtotal</span>
+                    <strong id="cart-total">$0.00</strong>
+                </div>
+                <div class="mb-3">
+                    <label class="fc-label">Delivery Address</label>
+                    <textarea class="fc-input" id="cart-address" rows="2"
+                        placeholder="Enter your delivery address…"></textarea>
+                </div>
+                <button class="btn-primary-custom w-100 justify-content-center" onclick="checkout()">
+                    <i class="bi bi-check-circle"></i> Place Order
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="fc-toast-container" id="toast-container"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/main.js"></script>
+    <script src="/static/js/customer.js"></script>
+    <script>
+        initNavbar();
+        const params = new URLSearchParams(window.location.search);
+        const restId = params.get('id');
+        if (!restId) { window.location.href = '/'; }
+
+        let currentRating = 0;
+
+        async function loadRestaurantMenu() {
+            // Load restaurant details from the restaurants list
+            const rests = await apiFetch('/api/restaurants');
+            const rest = Array.isArray(rests) ? rests.find(r => r._id === restId) : null;
+            if (rest) {
+                document.getElementById('rest-name').textContent = rest.name;
+                document.getElementById('rest-cuisine').textContent = rest.cuisine;
+                document.getElementById('rest-img').src = rest.image || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=300';
+                document.getElementById('rest-rating').innerHTML = renderStars(rest.rating) + ` <span class="rating-num">${rest.rating} (${rest.totalRatings || 0})</span>`;
+                document.title = rest.name + ' — FoodCourt';
+                
+                if (rest.offer) {
+                    document.getElementById('offer-banner').style.display = '';
+                    document.getElementById('offer-text').textContent = rest.offer;
+                }
+            }
+
+            const items = await apiFetch(`/api/menu/${restId}`);
+            const grid = document.getElementById('menu-grid');
+            if (!Array.isArray(items) || items.length === 0) {
+                grid.innerHTML = '<div class="col-12"><div class="empty-state"><div class="icon">🍽️</div><p>No menu items available yet.</p></div></div>';
+                return;
+            }
+            grid.innerHTML = items.map(item => `
+      <div class="col-12 col-md-6">
+        <div class="menu-card">
+          <img src="${item.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200'}" alt="${item.name}"
+               onerror="this.src='https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200'">
+          <div class="details">
+            <div class="name">${item.name}</div>
+            <div class="price">₹${item.price}</div>
+          </div>
+          <div class="ms-auto">
+            <button class="btn-primary-custom" style="padding:0.45rem 1rem;font-size:0.85rem"
+              onclick="addToCart('${item._id}','${item.name.replace(/'/g, "\\'")}',${item.price},'${restId}')">
+              <i class="bi bi-plus-lg"></i> Add
+            </button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+        }
+
+        async function loadReviews() {
+            const reviews = await apiFetch(`/api/reviews/${restId}`);
+            const list = document.getElementById('reviews-list');
+            if (!Array.isArray(reviews) || reviews.length === 0) {
+                list.innerHTML = '<p style="color:var(--text-muted)">No reviews yet. Be the first!</p>';
+                return;
+            }
+            list.innerHTML = reviews.map(r => `
+      <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:1rem;margin-bottom:0.75rem">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <strong>${r.user_name}</strong>
+          <span class="stars">${'★'.repeat(Math.round(r.rating))}${'☆'.repeat(5 - Math.round(r.rating))}</span>
+        </div>
+        ${r.comment ? `<p style="color:var(--text-muted);font-size:0.9rem;margin:0">${r.comment}</p>` : ''}
+      </div>
+    `).join('');
+        }
+
+        function setRating(n) {
+            currentRating = n;
+            const stars = document.querySelectorAll('#star-picker span');
+            stars.forEach((s, i) => { s.textContent = i < n ? '★' : '☆'; s.style.color = i < n ? 'var(--gold)' : ''; });
+        }
+
+        async function submitReview() {
+            if (!currentRating) { showToast('Please select a rating', 'error'); return; }
+            const res = await apiPost('/api/review', {
+                restaurant_id: restId,
+                rating: currentRating,
+                comment: document.getElementById('review-comment').value
+            }, true);
+            if (res.message) {
+                showToast('Review submitted! ⭐', 'success');
+                document.getElementById('review-comment').value = '';
+                setRating(0);
+                loadReviews();
+            } else {
+                showToast(res.error || 'Failed to submit review', 'error');
+            }
+        }
+
+        // Show review form only for logged-in customers
+        if (getToken() && getRole() === 'customer') {
+            document.getElementById('review-form-wrapper').style.display = '';
+        }
+
+        renderCart();
+        loadRestaurantMenu();
+        loadReviews();
+    </script>
+</body>
+
+</html>
