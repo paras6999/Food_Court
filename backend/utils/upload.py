@@ -1,5 +1,6 @@
 import os
 import uuid
+from typing import Optional
 from flask import current_app
 from werkzeug.utils import secure_filename
 from PIL import Image
@@ -11,7 +12,7 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def save_image(file, subfolder: str = "") -> str | None:
+def save_image(file, subfolder: str = "") -> Optional[str]:
     """Save an uploaded file and return its relative URL. Returns None on failure."""
     if not file or not allowed_file(file.filename):
         return None
