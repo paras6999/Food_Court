@@ -235,9 +235,14 @@
                     <textarea class="fc-input" id="cart-address" rows="2"
                         placeholder="Enter your delivery address…"></textarea>
                 </div>
-                <button class="btn-primary-custom w-100 justify-content-center" onclick="checkout()">
-                    <i class="bi bi-check-circle"></i> Place Order
-                </button>
+                <div class="d-flex gap-2">
+                    <button id="checkout-btn-razorpay" class="btn btn-primary-custom w-100 justify-content-center" onclick="checkout('razorpay')">
+                        <i class="bi bi-credit-card"></i> Pay Online
+                    </button>
+                    <button id="checkout-btn-cod" class="btn btn-outline-custom w-100 justify-content-center" style="border-color:var(--border);color:var(--text)" onclick="checkout('cod')">
+                        <i class="bi bi-cash"></i> COD
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -292,6 +297,7 @@
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
     <script src="/static/js/main.js?v=3"></script>
     <script src="/static/js/customer.js?v=3"></script>
     <script>

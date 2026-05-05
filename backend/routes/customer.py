@@ -2,10 +2,13 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import get_jwt_identity, get_jwt, jwt_required
 from bson import ObjectId
 from datetime import datetime
+import hmac, hashlib, razorpay
 from backend.db import restaurants_col, menu_col, orders_col, reviews_col, tables_col
 from backend.utils.auth_helper import role_required
+from backend.config import Config
 
 customer_bp = Blueprint("customer", __name__)
+razorpay_client = razorpay.Client(auth=(Config.RAZORPAY_KEY_ID, Config.RAZORPAY_KEY_SECRET))
 
 
 def _rest_to_dict(r):
@@ -326,3 +329,140 @@ def global_search():
         "restaurants": rests,
         "menu_items": enriched_items
     }), 200
+
+
+# ── Cancel Order ────────────────────────────────────────────────────────────────
+@customer_bp.route("/api/order/<order_id>/cancel", methods=["POST"])
+@role_required("customer")
+def cancel_order(order_id):
+    user_id = get_jwt_identity()
+    try:
+        oid = ObjectId(order_id)
+    except Exception:
+        return jsonify({"error": "Invalid order id"}), 400
+
+    order = orders_col.find_one({"_id": oid, "user_id": ObjectId(user_id)})
+    if not order:
+        return jsonify({"error": "Order not found or unauthorized"}), 404
+
+    if order.get("status") != "pending":
+        return jsonify({"error": "Order cannot be cancelled — restaurant has already started processing it"}), 400
+
+    orders_col.update_one(
+        {"_id": oid},
+        {"$set": {"status": "cancelled", "cancelled_at": datetime.utcnow()}}
+    )
+    return jsonify({"message": "Order cancelled successfully"}), 200
+
+
+# ── Razorpay: Create Payment Order ──────────────────────────────────────────────
+@customer_bp.route("/api/payment/create-order", methods=["POST"])
+@role_required("customer")
+def create_payment_order():
+    data = request.get_json()
+    amount_rupees = data.get("amount", 0)
+
+    if amount_rupees <= 0:
+        return jsonify({"error": "Invalid amount"}), 400
+
+    # Razorpay expects amount in paise (1 INR = 100 paise)
+    amount_paise = int(float(amount_rupees) * 100)
+
+    try:
+        rzp_order = razorpay_client.order.create({
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": f"fc_{ObjectId()}",
+            "payment_capture": 1
+        })
+    except Exception as e:
+        return jsonify({"error": f"Razorpay error: {str(e)}"}), 500
+
+    return jsonify({
+        "razorpay_order_id": rzp_order["id"],
+        "amount": amount_paise,
+        "currency": "INR",
+        "key_id": Config.RAZORPAY_KEY_ID
+    }), 200
+
+
+# ── Razorpay: Verify Payment & Place Food Order ──────────────────────────────────
+@customer_bp.route("/api/payment/verify", methods=["POST"])
+@role_required("customer")
+def verify_payment_and_place_order():
+    data = request.get_json()
+    razorpay_order_id   = data.get("razorpay_order_id", "")
+    razorpay_payment_id = data.get("razorpay_payment_id", "")
+    razorpay_signature  = data.get("razorpay_signature", "")
+
+    # Verify HMAC-SHA256 signature
+    msg = f"{razorpay_order_id}|{razorpay_payment_id}".encode()
+    expected = hmac.new(Config.RAZORPAY_KEY_SECRET.encode(), msg, hashlib.sha256).hexdigest()
+    if expected != razorpay_signature:
+        return jsonify({"error": "Payment verification failed — invalid signature"}), 400
+
+    # Now place the actual food order
+    user_id       = get_jwt_identity()
+    restaurant_id = data.get("restaurant_id")
+    items         = data.get("items", [])
+    address       = data.get("address", "")
+    table_number  = data.get("table_number")
+
+    if not restaurant_id or not items:
+        return jsonify({"error": "restaurant_id and items are required"}), 400
+
+    try:
+        rid = ObjectId(restaurant_id)
+    except Exception:
+        return jsonify({"error": "Invalid restaurant id"}), 400
+
+    # Validate table if dine-in
+    if table_number is not None:
+        table_number = int(table_number)
+        table = tables_col.find_one({"restaurant_id": rid, "table_number": table_number})
+        if not table:
+            return jsonify({"error": f"Table {table_number} not found"}), 404
+
+    # Enrich items from DB
+    total = 0
+    enriched = []
+    for item in items:
+        try:
+            menu_item = menu_col.find_one({"_id": ObjectId(item["item_id"])})
+        except Exception:
+            return jsonify({"error": f"Invalid item_id {item.get('item_id')}"}), 400
+        if not menu_item:
+            return jsonify({"error": f"Menu item not found: {item.get('item_id')}"}), 404
+        qty = int(item.get("quantity", 1))
+        price = menu_item["price"]
+        total += price * qty
+        enriched.append({
+            "item_id": menu_item["_id"],
+            "name": menu_item["name"],
+            "quantity": qty,
+            "price": price
+        })
+
+    order_doc = {
+        "user_id": ObjectId(user_id),
+        "restaurant_id": rid,
+        "items": enriched,
+        "total_price": total,
+        "address": address,
+        "status": "pending",
+        "created_at": datetime.utcnow(),
+        "payment": {
+            "razorpay_order_id": razorpay_order_id,
+            "razorpay_payment_id": razorpay_payment_id,
+            "paid": True
+        }
+    }
+
+    if table_number is not None:
+        order_doc["table_number"] = table_number
+        order_doc["order_type"] = "dine-in"
+    else:
+        order_doc["order_type"] = "delivery"
+
+    order_id = orders_col.insert_one(order_doc).inserted_id
+    return jsonify({"message": "Payment verified & order placed!", "order_id": str(order_id)}), 201

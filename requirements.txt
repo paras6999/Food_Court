@@ -10,3 +10,4 @@ Pillow==10.4.0
 Werkzeug==3.0.4
 google-auth==2.35.0
 dnspython==2.6.1
+razorpay==1.4.2

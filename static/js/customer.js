@@ -92,7 +92,7 @@ function renderCart() {
     }
 }
 
-async function checkout() {
+async function checkout(method = 'razorpay') {
     const cart = getCart();
     const restId = getCartRestId();
     const addressEl = document.getElementById('cart-address');
@@ -106,25 +106,99 @@ async function checkout() {
     if (!address) { showToast('Please enter a delivery address', 'error'); return; }
     if (cart.length === 0) { showToast('Your cart is empty', 'error'); return; }
 
-    const body = {
-        restaurant_id: restId,
-        items: cart.map(i => ({ item_id: i.itemId, quantity: i.quantity })),
-        address
+    const payBtn = document.getElementById(method === 'cod' ? 'checkout-btn-cod' : 'checkout-btn-razorpay');
+    const originalBtnHtml = payBtn ? payBtn.innerHTML : '';
+    if (payBtn) { payBtn.disabled = true; payBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Processing…'; }
+
+    // ── Cash on Delivery ──
+    if (method === 'cod') {
+        const body = {
+            restaurant_id: restId,
+            items: cart.map(i => ({ item_id: i.itemId, quantity: i.quantity })),
+            address
+        };
+        const res = await apiPost('/api/order', body, true);
+        if (res.order_id) {
+            saveCart([]);
+            localStorage.removeItem(CART_REST_KEY);
+            renderCart();
+            const sidebar = document.getElementById('cartSidebar');
+            if (sidebar) { const bs = bootstrap.Offcanvas.getInstance(sidebar); if (bs) bs.hide(); }
+            showToast('Order placed successfully via COD! 🎉', 'success');
+            setTimeout(() => window.location.href = '/orders.html', 1500);
+        } else {
+            showToast(res.error || 'Failed to place order', 'error');
+            if (payBtn) { payBtn.disabled = false; payBtn.innerHTML = originalBtnHtml; }
+        }
+        return;
+    }
+
+    // ── Razorpay Payment ──
+    const total = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+
+    const orderRes = await apiPost('/api/payment/create-order', { amount: total }, true);
+
+    if (orderRes.error) {
+        // If testing locally and razorpay module is missing, Vercel gives 500 error which is caught as "Network error"
+        let msg = orderRes.error;
+        if (msg === 'Network error') {
+            msg = 'Network error: Backend could not process payment. Did you install razorpay locally?';
+        }
+        showToast(msg, 'error');
+        if (payBtn) { payBtn.disabled = false; payBtn.innerHTML = originalBtnHtml; }
+        return;
+    }
+
+    const options = {
+        key: orderRes.key_id,
+        amount: orderRes.amount,
+        currency: orderRes.currency,
+        name: 'FoodCourt',
+        description: 'Food Order Payment',
+        order_id: orderRes.razorpay_order_id,
+        prefill: {
+            name: getName() || '',
+        },
+        theme: { color: '#ff6b35' },
+        handler: async function (response) {
+            const verifyRes = await apiPost('/api/payment/verify', {
+                razorpay_order_id:   response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature:  response.razorpay_signature,
+                restaurant_id: restId,
+                items: cart.map(i => ({ item_id: i.itemId, quantity: i.quantity })),
+                address: address
+            }, true);
+
+            if (verifyRes.order_id) {
+                saveCart([]);
+                localStorage.removeItem(CART_REST_KEY);
+                renderCart();
+                const sidebar = document.getElementById('cartSidebar');
+                if (sidebar) { const bs = bootstrap.Offcanvas.getInstance(sidebar); if (bs) bs.hide(); }
+                showToast('Payment successful! Order placed 🎉', 'success');
+                setTimeout(() => window.location.href = '/orders.html', 1500);
+            } else {
+                showToast(verifyRes.error || 'Payment verification failed', 'error');
+                if (payBtn) { payBtn.disabled = false; payBtn.innerHTML = originalBtnHtml; }
+            }
+        },
+        modal: {
+            ondismiss: function () {
+                showToast('Payment cancelled', 'error');
+                if (payBtn) { payBtn.disabled = false; payBtn.innerHTML = originalBtnHtml; }
+            }
+        }
     };
 
-    const res = await apiPost('/api/order', body, true);
-    if (res.order_id) {
-        saveCart([]);
-        localStorage.removeItem(CART_REST_KEY);
-        renderCart();
-        // Close sidebar
-        const sidebar = document.getElementById('cartSidebar');
-        if (sidebar) { const bs = bootstrap.Offcanvas.getInstance(sidebar); if (bs) bs.hide(); }
-        showToast('Order placed successfully! 🎉', 'success');
-        setTimeout(() => window.location.href = '/orders.html', 1500);
-    } else {
-        showToast(res.error || 'Failed to place order', 'error');
+    if (typeof Razorpay === 'undefined') {
+        showToast('Payment gateway not loaded. Please refresh.', 'error');
+        if (payBtn) { payBtn.disabled = false; payBtn.innerHTML = originalBtnHtml; }
+        return;
     }
+
+    const rzp = new Razorpay(options);
+    rzp.open();
 }
 
 // ── Restaurant listing ──────────────────────────────────
