@@ -32,8 +32,17 @@ app.register_blueprint(restaurant_bp)
 app.register_blueprint(admin_bp)
 
 # Ensure upload directory exists
-os.makedirs(os.path.join(app.root_path, Config.UPLOAD_FOLDER, "restaurants"), exist_ok=True)
-os.makedirs(os.path.join(app.root_path, Config.UPLOAD_FOLDER, "menu"), exist_ok=True)
+# On Vercel the app filesystem is read-only; uploads go to /tmp instead
+_upload_base = os.path.join(app.root_path, Config.UPLOAD_FOLDER)
+try:
+    os.makedirs(os.path.join(_upload_base, "restaurants"), exist_ok=True)
+    os.makedirs(os.path.join(_upload_base, "menu"), exist_ok=True)
+except OSError:
+    # Read-only filesystem (e.g. Vercel) — fall back to /tmp
+    _tmp_base = "/tmp/uploads"
+    os.makedirs(os.path.join(_tmp_base, "restaurants"), exist_ok=True)
+    os.makedirs(os.path.join(_tmp_base, "menu"), exist_ok=True)
+    app.config["UPLOAD_FOLDER"] = _tmp_base
 
 
 # ── Serve frontend pages ───────────────────────────────────────────────────────
