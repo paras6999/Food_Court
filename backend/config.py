@@ -13,4 +13,4 @@ class Config:
     ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
     JWT_ACCESS_TOKEN_EXPIRES = False   # tokens don't expire for demo; set a timedelta in prod
     CORS_ORIGINS = "*"
-    GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "77957118883-n0f61t165nj05m29q01k953rb3q7afun.apps.googleusercontent.com.apps.googleusercontent.com")
+    GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "77957118883-n0f61t165nj05m29q01k953rb3q7afun.apps.googleusercontent.com")
