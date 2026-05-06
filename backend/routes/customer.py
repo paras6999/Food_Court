@@ -97,16 +97,27 @@ def validate_table(restaurant_id, table_number):
     }), 200
 
 
+from flask_jwt_extended import jwt_required, get_jwt
+
 # ── Place Order ─────────────────────────────────────────────────────────────────
 @customer_bp.route("/api/order", methods=["POST"])
-@role_required("customer")
+@jwt_required(optional=True)
 def place_order():
     data = request.get_json()
     user_id = get_jwt_identity()
+    claims = get_jwt()
+    if claims and claims.get("role") != "customer":
+        # Ignore non-customer tokens (e.g. admin or restaurant)
+        user_id = None
+        
     restaurant_id = data.get("restaurant_id")
     items = data.get("items", [])
     address = data.get("address", "")
     table_number = data.get("table_number")  # Optional: for dine-in orders
+
+    # If it's a delivery order and no user_id, fail
+    if table_number is None and not user_id:
+        return jsonify({"error": "Login required for delivery orders"}), 401
 
     if not restaurant_id or not items:
         return jsonify({"error": "restaurant_id and items are required"}), 400
@@ -144,7 +155,7 @@ def place_order():
         })
 
     order_doc = {
-        "user_id": ObjectId(user_id),
+        "user_id": ObjectId(user_id) if user_id else "guest",
         "restaurant_id": rid,
         "items": enriched,
         "total_price": total,
@@ -217,6 +228,34 @@ def my_orders():
         result.append(d)
     return jsonify(result), 200
 
+# ── Get Guest Orders ────────────────────────────────────────────────────────────
+@customer_bp.route("/api/orders/guest", methods=["POST"])
+def guest_orders():
+    data = request.get_json() or {}
+    order_ids = data.get("order_ids", [])
+    
+    if not isinstance(order_ids, list):
+        return jsonify({"error": "order_ids must be a list"}), 400
+        
+    valid_oids = []
+    for oid in order_ids:
+        try:
+            valid_oids.append(ObjectId(oid))
+        except Exception:
+            pass
+            
+    if not valid_oids:
+        return jsonify([]), 200
+        
+    raw = list(orders_col.find({"_id": {"$in": valid_oids}}).sort("created_at", -1))
+    
+    result = []
+    for o in raw:
+        d = _order_to_dict(o)
+        rest = restaurants_col.find_one({"_id": ObjectId(d["restaurant_id"])}, {"name": 1})
+        d["restaurant_name"] = rest["name"] if rest else "Unknown"
+        result.append(d)
+    return jsonify(result), 200
 
 # ── Submit Review ───────────────────────────────────────────────────────────────
 @customer_bp.route("/api/review", methods=["POST"])
@@ -353,6 +392,41 @@ def cancel_order(order_id):
         {"$set": {"status": "cancelled", "cancelled_at": datetime.utcnow()}}
     )
     return jsonify({"message": "Order cancelled successfully"}), 200
+
+# ── Get Order by ID (For Digital Bill) ──────────────────────────────────────────
+@customer_bp.route("/api/order/<order_id>", methods=["GET"])
+def get_order_by_id(order_id):
+    try:
+        oid = ObjectId(order_id)
+    except Exception:
+        return jsonify({"error": "Invalid order id"}), 400
+
+    order = orders_col.find_one({"_id": oid})
+    if not order:
+        return jsonify({"error": "Order not found"}), 404
+        
+    order_dict = _order_to_dict(order)
+    
+    # Enrich with restaurant details for the bill
+    rest = restaurants_col.find_one({"_id": ObjectId(order_dict["restaurant_id"])}, {"name": 1, "address": 1})
+    if rest:
+        order_dict["restaurant_name"] = rest.get("name", "Restaurant")
+        order_dict["restaurant_address"] = rest.get("address", "")
+        
+    # Get user name if possible
+    if order_dict.get("user_id") and order_dict.get("user_id") != "guest":
+        from backend.db import users_col
+        try:
+            user = users_col.find_one({"_id": ObjectId(order_dict["user_id"])})
+            if user:
+                order_dict["customer_name"] = user.get("name", "Customer")
+        except:
+            pass
+            
+    if "customer_name" not in order_dict:
+        order_dict["customer_name"] = "Guest"
+
+    return jsonify(order_dict), 200
 
 
 # ── Razorpay: Create Payment Order ──────────────────────────────────────────────

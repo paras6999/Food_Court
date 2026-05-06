@@ -14,6 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://unpkg.com/html5-qrcode"></script>
 </head>
 
 <body>
@@ -38,6 +39,17 @@
                     <li class="nav-item" id="nav-register">
                         <a class="btn-primary-custom" href="/register.html"
                             style="font-size:0.9rem; padding:0.5rem 1.2rem;">Sign Up</a>
+                    </li>
+                    <li class="nav-item d-flex align-items-center">
+                        <div class="theme-switch-wrapper">
+                            <label class="theme-switch" for="checkbox-theme-index">
+                                <input type="checkbox" id="checkbox-theme-index" />
+                                <div class="slider">
+                                    <span class="slider-icon">☀️</span>
+                                    <span class="slider-icon" style="padding-right:2px;">🌙</span>
+                                </div>
+                            </label>
+                        </div>
                     </li>
                     <!-- Logged-in user menu -->
                     <li class="nav-item dropdown" id="nav-user" style="display:none">
@@ -256,16 +268,7 @@
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body text-center py-4">
-                    <div class="qr-scanner-box">
-                        <div class="qr-scanner-frame">
-                            <div class="qr-corner tl"></div>
-                            <div class="qr-corner tr"></div>
-                            <div class="qr-corner bl"></div>
-                            <div class="qr-corner br"></div>
-                            <div class="qr-scan-line"></div>
-                            <i class="bi bi-qr-code" style="font-size:3rem;opacity:0.2"></i>
-                        </div>
-                    </div>
+                    <div id="qr-reader" style="width: 100%; border-radius: 12px; margin-top: 1rem; overflow: hidden;"></div>
                     <p class="mt-3" style="color:var(--text-muted);font-size:0.95rem">
                         Point your camera at the QR code on your table
                     </p>
@@ -350,8 +353,69 @@
         }
 
         // ── QR Scanner ─────────────────────────────
+        let html5QrcodeScanner = null;
+
         function openQrScanner() {
-            new bootstrap.Modal(document.getElementById('qrScannerModal')).show();
+            const modalEl = document.getElementById('qrScannerModal');
+            const modal = new bootstrap.Modal(modalEl);
+            modal.show();
+
+            if (!html5QrcodeScanner) {
+                html5QrcodeScanner = new Html5Qrcode("qr-reader");
+            }
+            
+            html5QrcodeScanner.start(
+                { facingMode: "environment" }, 
+                { fps: 10, qrbox: { width: 250, height: 250 } },
+                (decodedText, decodedResult) => {
+                    // Success callback
+                    console.log(`Scan result: ${decodedText}`);
+                    
+                    // Stop scanner
+                    html5QrcodeScanner.stop().then(ignore => {
+                        console.log("Scanner stopped.");
+                        modal.hide();
+                        
+                        // Play a beep sound
+                        const context = new (window.AudioContext || window.webkitAudioContext)();
+                        const oscillator = context.createOscillator();
+                        oscillator.type = "sine";
+                        oscillator.frequency.value = 800;
+                        oscillator.connect(context.destination);
+                        oscillator.start();
+                        setTimeout(() => oscillator.stop(), 200);
+
+                        // Parse url and redirect if valid
+                        try {
+                            const url = new URL(decodedText);
+                            const restId = url.searchParams.get('restaurant');
+                            const tableNum = url.searchParams.get('table');
+                            
+                            if (restId && tableNum) {
+                                window.location.href = `/customer_table.html?restaurant=${restId}&table=${tableNum}`;
+                            } else {
+                                window.location.href = decodedText;
+                            }
+                        } catch (e) {
+                            window.location.href = decodedText;
+                        }
+                    }).catch(err => {
+                        console.log("Stop failed: ", err);
+                    });
+                },
+                (errorMessage) => {
+                    // parse error, ignore it.
+                }
+            ).catch(err => {
+                showToast("Error starting camera", "error");
+            });
+
+            // Handle modal hide to stop camera
+            modalEl.addEventListener('hidden.bs.modal', function () {
+                if (html5QrcodeScanner && html5QrcodeScanner.isScanning) {
+                    html5QrcodeScanner.stop().catch(e => console.log(e));
+                }
+            });
         }
 
         function goToManualUrl() {

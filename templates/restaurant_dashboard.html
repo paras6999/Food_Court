@@ -129,6 +129,10 @@
                                 <option value="delivered">Delivered</option>
                                 <option value="rejected">Rejected</option>
                             </select>
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-outline-custom active" id="btn-view-table" onclick="setOrderView('table')"><i class="bi bi-list"></i> Table</button>
+                                <button type="button" class="btn btn-outline-custom" id="btn-view-kanban" onclick="setOrderView('kanban')"><i class="bi bi-kanban"></i> Kanban</button>
+                            </div>
                             <button class="btn-outline-custom" style="padding:.4rem 1rem;font-size:.85rem"
                                 onclick="loadOrders()">
                                 <i class="bi bi-arrow-clockwise"></i> Refresh
@@ -155,6 +159,39 @@
                                 </tr>
                             </tbody>
                         </table>
+                    </div>
+                    
+                    <!-- Kanban View (hidden by default) -->
+                    <div id="orders-kanban-view" style="display:none">
+                        <div class="row g-3">
+                            <div class="col-12 col-md-4">
+                                <div class="fc-card p-3 h-100" style="background: rgba(255,107,53,0.05); border-top: 3px solid var(--primary);">
+                                    <h5 class="mb-3 d-flex justify-content-between align-items-center">
+                                        <span>🟠 Pending</span>
+                                        <span class="badge bg-primary" id="kb-pending-count">0</span>
+                                    </h5>
+                                    <div id="kb-pending-col" class="d-flex flex-column gap-2"></div>
+                                </div>
+                            </div>
+                            <div class="col-12 col-md-4">
+                                <div class="fc-card p-3 h-100" style="background: rgba(32,201,151,0.05); border-top: 3px solid #20c997;">
+                                    <h5 class="mb-3 d-flex justify-content-between align-items-center">
+                                        <span>🔥 Preparing / 🟢 Ready</span>
+                                        <span class="badge" style="background: #20c997" id="kb-prep-count">0</span>
+                                    </h5>
+                                    <div id="kb-prep-col" class="d-flex flex-column gap-2"></div>
+                                </div>
+                            </div>
+                            <div class="col-12 col-md-4">
+                                <div class="fc-card p-3 h-100" style="background: rgba(136,146,164,0.05); border-top: 3px solid var(--text-muted);">
+                                    <h5 class="mb-3 d-flex justify-content-between align-items-center">
+                                        <span>✔️ Completed</span>
+                                        <span class="badge bg-secondary" id="kb-done-count">0</span>
+                                    </h5>
+                                    <div id="kb-done-col" class="d-flex flex-column gap-2"></div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -266,6 +303,35 @@
             </div>
         </div>
     </div>
+
+    <!-- AI Analyst Chat Panel -->
+    <div id="ai-chat-panel" style="position:fixed; bottom:20px; right:20px; width:350px; max-height:500px; background:var(--surface); border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.2); border:1px solid var(--border); display:flex; flex-direction:column; z-index:1000; overflow:hidden; transform: translateY(120%); transition: transform 0.3s ease;">
+        <div style="background:var(--primary); padding:1rem; color:white; font-weight:bold; d-flex justify-content-between; display:flex; justify-content:space-between; align-items:center;">
+            <span><i class="bi bi-robot"></i> AI Analyst</span>
+            <button class="btn-close btn-close-white" onclick="toggleAIChat()"></button>
+        </div>
+        <div id="ai-chat-messages" style="flex:1; padding:1rem; overflow-y:auto; display:flex; flex-direction:column; gap:0.8rem; background:rgba(0,0,0,0.02); min-height:250px;">
+            <div style="background:var(--card-bg); padding:0.8rem; border-radius:8px; align-self:flex-start; border:1px solid var(--border); max-width:85%;">
+                Hello! I'm your AI Business Analyst. How can I help you grow today?
+            </div>
+        </div>
+        <div style="padding:0.5rem 1rem; border-top:1px solid var(--border); background:var(--surface);">
+            <div style="display:flex; gap:0.5rem; overflow-x:auto; padding-bottom:0.5rem; white-space:nowrap; scrollbar-width:none;" class="quick-prompts">
+                <span class="badge" style="background:rgba(255,107,53,0.1); color:var(--primary); cursor:pointer; border:1px solid var(--primary);" onclick="sendAIQuery('Analyze weekly sales patterns')">📈 Analyze sales</span>
+                <span class="badge" style="background:rgba(255,107,53,0.1); color:var(--primary); cursor:pointer; border:1px solid var(--primary);" onclick="sendAIQuery('Summarize user reviews')">⭐ Summarize reviews</span>
+                <span class="badge" style="background:rgba(255,107,53,0.1); color:var(--primary); cursor:pointer; border:1px solid var(--primary);" onclick="sendAIQuery('How do I increase revenue?')">💡 Increase revenue</span>
+            </div>
+            <form onsubmit="handleAIQuery(event)" style="display:flex; gap:0.5rem; margin-top:0.5rem;">
+                <input type="text" id="ai-chat-input" class="fc-input" style="flex:1; padding:0.4rem 0.8rem;" placeholder="Ask anything..." autocomplete="off">
+                <button type="submit" class="btn-primary-custom" style="padding:0.4rem 0.8rem;"><i class="bi bi-send"></i></button>
+            </form>
+        </div>
+    </div>
+    
+    <!-- AI Chat Toggle Button -->
+    <button class="btn-primary-custom" style="position:fixed; bottom:20px; right:20px; border-radius:50px; width:50px; height:50px; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(255,107,53,0.3); z-index:999;" onclick="toggleAIChat()">
+        <i class="bi bi-robot" style="font-size:1.5rem;"></i>
+    </button>
 
     <div class="fc-toast-container" id="toast-container"></div>
 

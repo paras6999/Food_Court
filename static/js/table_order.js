@@ -34,10 +34,14 @@ function updateAuthUI() {
     if (loginBtn) loginBtn.style.display = 'none';
     if (logoutBtn) logoutBtn.style.display = '';
     if (userName) { userName.style.display = ''; userName.textContent = name; }
+    const promo = document.getElementById('guest-promo-banner');
+    if (promo) promo.style.display = 'none';
   } else {
     if (loginBtn) loginBtn.style.display = '';
     if (logoutBtn) logoutBtn.style.display = 'none';
     if (userName) userName.style.display = 'none';
+    const promo = document.getElementById('guest-promo-banner');
+    if (promo) promo.style.display = '';
   }
 }
 
@@ -98,6 +102,18 @@ async function validateTable() {
   }
 }
 
+let currentTableMenuFilters = { veg: false, best: false };
+
+function toggleTableMenuFilter(type) {
+    currentTableMenuFilters[type] = !currentTableMenuFilters[type];
+    const btn = document.getElementById(`filter-${type}`);
+    if (btn) {
+        if (currentTableMenuFilters[type]) btn.classList.add('active');
+        else btn.classList.remove('active');
+    }
+    renderMenu();
+}
+
 // ── Render Menu ─────────────────────────────────────────
 function renderMenu() {
   const grid = document.getElementById('menu-grid');
@@ -106,18 +122,39 @@ function renderMenu() {
     return;
   }
 
-  grid.innerHTML = menuData.map((item, idx) => `
+  // Pre-process items
+  const processedItems = menuData.map(item => {
+    const nameLower = item.name.toLowerCase();
+    const isVeg = !(nameLower.includes('chicken') || nameLower.includes('beef') || nameLower.includes('pork') || nameLower.includes('fish') || nameLower.includes('meat') || nameLower.includes('egg'));
+    const isBestseller = item.price > 150 && item.price < 300;
+    const restName = restaurantData ? restaurantData.name.replace(/'/g, "\\'") : 'Restaurant';
+    return { ...item, isVeg, isBestseller, restName };
+  });
+
+  let filtered = processedItems;
+  if (currentTableMenuFilters.veg) filtered = filtered.filter(i => i.isVeg);
+  if (currentTableMenuFilters.best) filtered = filtered.filter(i => i.isBestseller);
+
+  if (filtered.length === 0) {
+    grid.innerHTML = '<div class="col-12"><div class="empty-state"><div class="icon">🍽️</div><p>No menu items match your filters.</p></div></div>';
+    return;
+  }
+
+  grid.innerHTML = filtered.map((item, idx) => `
     <div class="col-12 col-md-6" style="animation-delay:${idx * 0.05}s">
-      <div class="menu-card">
+      <div class="menu-card" style="cursor:pointer" onclick="openItemDetails('${item._id}', '${item.name.replace(/'/g, "\\'")}', ${item.price}, '${restaurantId}', '${item.restName}', '${item.image || ''}', '${item.description || ''}', ${item.isVeg})">
         <img src="${item.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200'}" alt="${item.name}"
              onerror="this.src='https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200'">
         <div class="details">
-          <div class="name">${item.name}</div>
+          <div class="name">
+              ${item.isVeg ? '<span style="font-size:0.7rem">🟢</span>' : '<span style="font-size:0.7rem">🔴</span>'}
+              ${item.name}
+          </div>
           <div class="price">₹${item.price}</div>
         </div>
         <div class="ms-auto">
           <button class="btn-primary-custom" style="padding:0.45rem 1rem;font-size:0.85rem"
-            onclick="addToTableCart('${item._id}','${item.name.replace(/'/g, "\\'")}',${item.price})">
+            onclick="event.stopPropagation(); openItemDetails('${item._id}', '${item.name.replace(/'/g, "\\'")}', ${item.price}, '${restaurantId}', '${item.restName}', '${item.image || ''}', '${item.description || ''}', ${item.isVeg})">
             <i class="bi bi-plus-lg"></i> Add
           </button>
         </div>
@@ -127,27 +164,27 @@ function renderMenu() {
 }
 
 // ── Cart Logic ──────────────────────────────────────────
-function addToTableCart(itemId, name, price) {
-  const existing = tableCart.find(i => i.itemId === itemId);
+function addToTableCart(itemId, name, price, optionsStr = '') {
+  const existing = tableCart.find(i => i.itemId === itemId && i.options === optionsStr);
   if (existing) {
     existing.quantity += 1;
   } else {
-    tableCart.push({ itemId, name, price, quantity: 1 });
+    tableCart.push({ itemId, name, price, quantity: 1, options: optionsStr });
   }
   renderTableCart();
   showToast(`${name} added to order 🛒`, 'success');
 }
 
-function removeFromTableCart(itemId) {
-  tableCart = tableCart.filter(i => i.itemId !== itemId);
+function removeFromTableCart(itemId, optionsStr = '') {
+  tableCart = tableCart.filter(i => !(i.itemId === itemId && i.options === optionsStr));
   renderTableCart();
 }
 
-function changeTableQty(itemId, delta) {
-  const item = tableCart.find(i => i.itemId === itemId);
+function changeTableQty(itemId, delta, optionsStr = '') {
+  const item = tableCart.find(i => i.itemId === itemId && i.options === optionsStr);
   if (!item) return;
   item.quantity += delta;
-  if (item.quantity <= 0) tableCart = tableCart.filter(i => i.itemId !== itemId);
+  if (item.quantity <= 0) tableCart = tableCart.filter(i => !(i.itemId === itemId && i.options === optionsStr));
   renderTableCart();
 }
 
@@ -173,14 +210,15 @@ function renderTableCart() {
     <div style="display:flex;align-items:center;gap:.75rem;padding:.75rem 0;border-bottom:1px solid var(--border)">
       <div style="flex:1">
         <div style="font-weight:600;font-size:.9rem">${item.name}</div>
+        ${item.options ? `<div style="font-size:0.75rem;color:var(--text-muted)">${item.options}</div>` : ''}
         <div style="color:var(--primary);font-size:.88rem;font-weight:600">₹${item.price} each</div>
       </div>
       <div class="qty-ctrl">
-        <button class="qty-btn" onclick="changeTableQty('${item.itemId}',-1)">−</button>
+        <button class="qty-btn" onclick="changeTableQty('${item.itemId}',-1,'${item.options}')">−</button>
         <span class="qty-num">${item.quantity}</span>
-        <button class="qty-btn" onclick="changeTableQty('${item.itemId}',1)">+</button>
+        <button class="qty-btn" onclick="changeTableQty('${item.itemId}',1,'${item.options}')">+</button>
       </div>
-      <button onclick="removeFromTableCart('${item.itemId}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:1.1rem">🗑</button>
+      <button onclick="removeFromTableCart('${item.itemId}','${item.options}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:1.1rem">🗑</button>
     </div>
   `).join('');
 
@@ -193,16 +231,6 @@ function renderTableCart() {
 
 // ── Place Order ─────────────────────────────────────────
 async function placeTableOrder() {
-  if (!getToken() || getRole() !== 'customer') {
-    showToast('Please login first to place your order', 'error');
-    setTimeout(() => {
-      // Store current URL so we can redirect back
-      localStorage.setItem('fc_redirect', window.location.href);
-      window.location.href = '/login.html';
-    }, 1200);
-    return;
-  }
-
   if (tableCart.length === 0) {
     showToast('Your order is empty', 'error');
     return;
@@ -212,14 +240,28 @@ async function placeTableOrder() {
   btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Placing…';
   btn.disabled = true;
 
+  const isGuest = !getToken() || getRole() !== 'customer';
+
   const body = {
     restaurant_id: restaurantId,
     table_number: tableNumber,
-    items: tableCart.map(i => ({ item_id: i.itemId, quantity: i.quantity })),
+    items: tableCart.map(i => ({ item_id: i.itemId, quantity: i.quantity, options: i.options })),
     address: `Dine-In — Table ${tableNumber}`
   };
 
-  const res = await apiPost('/api/order', body, true);
+  const headers = isGuest ? { 'Content-Type': 'application/json' } : authHeaders();
+
+  let res;
+  try {
+    const response = await fetch(API + '/api/order', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(body)
+    });
+    res = await response.json();
+  } catch (err) {
+    res = { error: 'Network error' };
+  }
 
   btn.innerHTML = '<i class="bi bi-check-circle"></i> Place Dine-In Order';
   btn.disabled = false;
@@ -231,6 +273,13 @@ async function placeTableOrder() {
     const sidebar = document.getElementById('cartSidebar');
     if (sidebar) { const bs = bootstrap.Offcanvas.getInstance(sidebar); if (bs) bs.hide(); }
     showToast('Order placed! 🎉 The kitchen is preparing your food.', 'success');
+    
+    if (isGuest) {
+      let guestOrders = JSON.parse(localStorage.getItem('fc_guest_orders') || '[]');
+      guestOrders.push(res.order_id);
+      localStorage.setItem('fc_guest_orders', JSON.stringify(guestOrders));
+    }
+    
     loadActiveOrders();
   } else {
     showToast(res.error || 'Failed to place order', 'error');
@@ -247,9 +296,26 @@ function stepProgress(status) {
 }
 
 async function loadActiveOrders() {
-  if (!getToken()) return;
+  const isGuest = !getToken() || getRole() !== 'customer';
+  let orders = [];
 
-  const orders = await apiFetch('/api/orders/me', true);
+  if (isGuest) {
+    const guestOrders = JSON.parse(localStorage.getItem('fc_guest_orders') || '[]');
+    if (guestOrders.length === 0) return;
+    try {
+        const response = await fetch(API + '/api/orders/guest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order_ids: guestOrders })
+        });
+        orders = await response.json();
+    } catch(err) {
+        return;
+    }
+  } else {
+    orders = await apiFetch('/api/orders/me', true);
+  }
+
   const section = document.getElementById('active-orders-section');
   const list = document.getElementById('active-orders-list');
 
@@ -286,7 +352,7 @@ async function loadActiveOrders() {
         </div>
         <div>
           <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-muted);margin-bottom:.35rem">
-            <span>Placed</span><span>Accepted</span><span>Preparing</span><span>Ready</span><span>Served</span>
+            <span>🟠 Placed</span><span>🔵 Accepted</span><span>🔥 Cooking</span><span>🟢 Ready</span><span>✔️ Served</span>
           </div>
           <div class="order-progress-track">
             <div class="order-progress-fill" style="width:${progress}%"></div>

@@ -57,6 +57,8 @@ def serve_page(page):
     except Exception:
         return send_from_directory("templates", "index.html")
 
-
+@app.route("/bill/<order_id>")
+def serve_bill(order_id):
+    return send_from_directory("templates", "bill.html")
 if __name__ == "__main__":
     app.run(debug=os.getenv("FLASK_DEBUG", "false").lower() == "true", host="0.0.0.0", port=5000)

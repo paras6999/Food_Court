@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoice — FoodCourt</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧾</text></svg>">
+    <style>
+        :root {
+            --bg-color: #f1f3f5;
+            --receipt-bg: #ffffff;
+            --text-color: #1e293b;
+            --dotted-border: 1px dashed #94a3b8;
+            --font-family: 'Courier New', Courier, monospace;
+        }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: var(--font-family);
+            display: flex;
+            justify-content: center;
+            padding: 2rem;
+            margin: 0;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        .receipt-container {
+            background: var(--receipt-bg);
+            width: 100%;
+            max-width: 400px;
+            padding: 2rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .text-bold { font-weight: bold; }
+        .divider { border-top: var(--dotted-border); margin: 1rem 0; }
+        .header h1 { margin: 0; font-size: 1.5rem; text-transform: uppercase; }
+        .header p { margin: 0.2rem 0; }
+        .details p { margin: 0.2rem 0; }
+        .table { width: 100%; border-collapse: collapse; margin: 1rem 0; }
+        .table th, .table td { padding: 0.4rem 0; vertical-align: top; }
+        .table th { border-bottom: var(--dotted-border); border-top: var(--dotted-border); text-align: left; }
+        .table .qty { width: 40px; text-align: center; }
+        .table .price { text-align: right; width: 80px; }
+        .item-options { font-size: 0.85em; color: #64748b; }
+        .totals { margin-top: 1rem; }
+        .totals-row { display: flex; justify-content: space-between; margin-bottom: 0.3rem; }
+        .totals-row.grand-total { font-weight: bold; font-size: 1.2rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: var(--dotted-border); }
+        .footer { margin-top: 2rem; }
+        
+        .floating-actions {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            display: flex;
+            gap: 1rem;
+        }
+        .btn {
+            background: #ff6b35;
+            color: white;
+            border: none;
+            padding: 0.8rem 1.5rem;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-family: 'Inter', sans-serif;
+            font-weight: 600;
+            box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: transform 0.2s;
+        }
+        .btn:hover { transform: translateY(-2px); }
+
+        @media print {
+            body { background: white; padding: 0; }
+            .receipt-container { box-shadow: none; max-width: 100%; padding: 0; }
+            .floating-actions { display: none !important; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="receipt-container" id="receipt-content">
+        <div class="text-center">Loading receipt...</div>
+    </div>
+
+    <div class="floating-actions">
+        <button class="btn" onclick="window.print()">
+            <svg width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M5 1a2 2 0 0 0-2 2v1h10V3a2 2 0 0 0-2-2H5zm6 8H5a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1z"/><path d="M0 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-1v-2a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v2H2a2 2 0 0 1-2-2V7zm2.5 1a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/></svg>
+            Print Bill
+        </button>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+    <script>
+        async function loadBill() {
+            // Extract order_id from the URL path: /bill/<order_id>
+            const parts = window.location.pathname.split('/');
+            const orderId = parts[parts.length - 1];
+
+            if (!orderId) {
+                document.getElementById('receipt-content').innerHTML = '<div class="text-center">Invalid Order ID</div>';
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/order/${orderId}`);
+                if (!response.ok) throw new Error('Order not found');
+                const order = await response.json();
+
+                const date = new Date(order.created_at).toLocaleString();
+                const shortId = order._id.slice(-8).toUpperCase();
+                
+                const itemsHtml = order.items.map(i => `
+                    <tr>
+                        <td class="qty">${i.quantity}</td>
+                        <td>
+                            ${i.name}
+                            ${i.options ? `<div class="item-options">${i.options}</div>` : ''}
+                        </td>
+                        <td class="price">${(i.price * i.quantity).toFixed(2)}</td>
+                    </tr>
+                `).join('');
+
+                const orderTypeLabel = order.order_type === 'dine-in' ? `Dine-In (Table ${order.table_number})` : 'Delivery';
+
+                let html = `
+                    <div class="header text-center">
+                        <h1>${order.restaurant_name}</h1>
+                        <p>${order.restaurant_address || 'Food Court Venue'}</p>
+                        <p>Tel: +91 99999 00000</p>
+                    </div>
+                    
+                    <div class="divider"></div>
+                    
+                    <div class="details">
+                        <p><span class="text-bold">Order #:</span> ${shortId}</p>
+                        <p><span class="text-bold">Date:</span> ${date}</p>
+                        <p><span class="text-bold">Type:</span> ${orderTypeLabel}</p>
+                        <p><span class="text-bold">Customer:</span> ${order.customer_name || 'Guest'}</p>
+                    </div>
+
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th class="qty">Qty</th>
+                                <th>Item</th>
+                                <th class="price">Amt</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${itemsHtml}
+                        </tbody>
+                    </table>
+
+                    <div class="totals">
+                        <div class="totals-row">
+                            <span>Subtotal</span>
+                            <span>${order.total_price.toFixed(2)}</span>
+                        </div>
+                        <div class="totals-row">
+                            <span>Tax (Included)</span>
+                            <span>0.00</span>
+                        </div>
+                        <div class="totals-row grand-total">
+                            <span>Total (INR)</span>
+                            <span>${order.total_price.toFixed(2)}</span>
+                        </div>
+                    </div>
+
+                    <div class="divider"></div>
+
+                    <div class="footer text-center">
+                        <p class="text-bold">Thank You!</p>
+                        <p>Please visit us again.</p>
+                        <p>Digital Receipt generated by FoodCourt</p>
+                    </div>
+                `;
+
+                document.getElementById('receipt-content').innerHTML = html;
+
+            } catch (err) {
+                document.getElementById('receipt-content').innerHTML = `<div class="text-center">Error loading receipt: ${err.message}</div>`;
+            }
+        }
+
+        loadBill();
+    </script>
+</body>
+</html>

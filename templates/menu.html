@@ -49,6 +49,10 @@
     <!-- MENU ITEMS -->
     <section class="py-5">
         <div class="container">
+            <div class="d-flex gap-2 mb-4">
+                <button class="pill" id="filter-veg" onclick="toggleMenuFilter('veg')">🟢 Veg Only</button>
+                <button class="pill" id="filter-best" onclick="toggleMenuFilter('best')">🔥 Bestsellers</button>
+            </div>
             <div class="row g-3" id="menu-grid">
                 <div class="col-12 text-center py-5" style="color:var(--text-muted)">
                     <div class="spinner-border text-warning"></div>
@@ -142,11 +146,16 @@
 
         let currentRating = 0;
 
+        let originalMenuItems = [];
+        let currentMenuFilters = { veg: false, best: false };
+
         async function loadRestaurantMenu() {
             // Load restaurant details from the restaurants list
             const rests = await apiFetch('/api/restaurants');
             const rest = Array.isArray(rests) ? rests.find(r => r._id === restId) : null;
+            let restName = "Restaurant";
             if (rest) {
+                restName = rest.name.replace(/'/g, "\\'");
                 document.getElementById('rest-name').textContent = rest.name;
                 document.getElementById('rest-cuisine').textContent = rest.cuisine;
                 document.getElementById('rest-img').src = rest.image || 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=300';
@@ -160,23 +169,55 @@
             }
 
             const items = await apiFetch(`/api/menu/${restId}`);
-            const grid = document.getElementById('menu-grid');
-            if (!Array.isArray(items) || items.length === 0) {
-                grid.innerHTML = '<div class="col-12"><div class="empty-state"><div class="icon">🍽️</div><p>No menu items available yet.</p></div></div>';
+            if (!Array.isArray(items)) {
+                document.getElementById('menu-grid').innerHTML = '<div class="col-12"><div class="empty-state"><div class="icon">🍽️</div><p>Failed to load menu.</p></div></div>';
                 return;
             }
-            grid.innerHTML = items.map(item => `
+            originalMenuItems = items.map(item => {
+                // Mock isVeg and isBestseller based on name for demonstration
+                const nameLower = item.name.toLowerCase();
+                const isVeg = !(nameLower.includes('chicken') || nameLower.includes('beef') || nameLower.includes('pork') || nameLower.includes('fish') || nameLower.includes('meat') || nameLower.includes('egg'));
+                const isBestseller = item.price > 150 && item.price < 300;
+                return { ...item, isVeg, isBestseller, restName };
+            });
+            
+            renderMenuItems();
+        }
+        
+        function toggleMenuFilter(type) {
+            currentMenuFilters[type] = !currentMenuFilters[type];
+            const btn = document.getElementById(`filter-${type}`);
+            if (currentMenuFilters[type]) btn.classList.add('active');
+            else btn.classList.remove('active');
+            renderMenuItems();
+        }
+
+        function renderMenuItems() {
+            const grid = document.getElementById('menu-grid');
+            
+            let filtered = originalMenuItems;
+            if (currentMenuFilters.veg) filtered = filtered.filter(i => i.isVeg);
+            if (currentMenuFilters.best) filtered = filtered.filter(i => i.isBestseller);
+            
+            if (filtered.length === 0) {
+                grid.innerHTML = '<div class="col-12"><div class="empty-state"><div class="icon">🍽️</div><p>No menu items match your filters.</p></div></div>';
+                return;
+            }
+            grid.innerHTML = filtered.map(item => `
       <div class="col-12 col-md-6">
-        <div class="menu-card">
+        <div class="menu-card" style="cursor:pointer" onclick="openItemDetails('${item._id}', '${item.name.replace(/'/g, "\\'")}', ${item.price}, '${restId}', '${item.restName}', '${item.image || ''}', '${item.description || ''}', ${item.isVeg})">
           <img src="${item.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200'}" alt="${item.name}"
                onerror="this.src='https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200'">
           <div class="details">
-            <div class="name">${item.name}</div>
+            <div class="name">
+                ${item.isVeg ? '<span style="font-size:0.7rem">🟢</span>' : '<span style="font-size:0.7rem">🔴</span>'}
+                ${item.name}
+            </div>
             <div class="price">₹${item.price}</div>
           </div>
           <div class="ms-auto">
             <button class="btn-primary-custom" style="padding:0.45rem 1rem;font-size:0.85rem"
-              onclick="addToCart('${item._id}','${item.name.replace(/'/g, "\\'")}',${item.price},'${restId}')">
+              onclick="event.stopPropagation(); openItemDetails('${item._id}', '${item.name.replace(/'/g, "\\'")}', ${item.price}, '${restId}', '${item.restName}', '${item.image || ''}', '${item.description || ''}', ${item.isVeg})">
               <i class="bi bi-plus-lg"></i> Add
             </button>
           </div>

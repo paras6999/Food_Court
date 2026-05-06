@@ -4,50 +4,64 @@
 
 // ── Cart (stored in localStorage) ──────────────────────
 const CART_KEY = 'fc_cart';
-const CART_REST_KEY = 'fc_cart_restaurant';
 
-function getCart() { return JSON.parse(localStorage.getItem(CART_KEY) || '[]'); }
+function getCart() { 
+    let cart = JSON.parse(localStorage.getItem(CART_KEY) || '{}');
+    if (Array.isArray(cart)) {
+        cart = {}; // migrate old array cart
+        saveCart(cart);
+    }
+    return cart;
+}
+
 function saveCart(cart) { localStorage.setItem(CART_KEY, JSON.stringify(cart)); }
-function getCartRestId() { return localStorage.getItem(CART_REST_KEY) || ''; }
-function setCartRestId(id) { localStorage.setItem(CART_REST_KEY, id); }
 
-function addToCart(itemId, name, price, restId) {
-    const currentRest = getCartRestId();
+function addToCart(itemId, name, price, restId, optionsStr = '', restName = 'Restaurant') {
     let cart = getCart();
 
-    // If user is trying to add from a different restaurant, ask them to clear
-    if (currentRest && currentRest !== restId && cart.length > 0) {
-        if (!confirm('Your cart has items from another restaurant. Clear cart and add this item?')) return;
-        cart = [];
+    if (!cart[restId]) {
+        cart[restId] = { restaurant_name: restName, items: [] };
     }
-
-    setCartRestId(restId);
-    const existing = cart.find(i => i.itemId === itemId);
+    
+    const existing = cart[restId].items.find(i => i.item_id === itemId && i.options === optionsStr);
     if (existing) {
         existing.quantity += 1;
     } else {
-        cart.push({ itemId, name, price, quantity: 1 });
+        cart[restId].items.push({ item_id: itemId, name: name, price: price, quantity: 1, options: optionsStr });
     }
+    
     saveCart(cart);
     renderCart();
     showToast(`${name} added to cart 🛒`, 'success');
 }
 
-function removeFromCart(itemId) {
-    let cart = getCart().filter(i => i.itemId !== itemId);
+function removeFromCart(restId, itemId, optionsStr = '') {
+    let cart = getCart();
+    if (cart[restId]) {
+        cart[restId].items = cart[restId].items.filter(i => !(i.item_id === itemId && i.options === optionsStr));
+        if (cart[restId].items.length === 0) {
+            delete cart[restId];
+        }
+    }
     saveCart(cart);
-    if (cart.length === 0) { localStorage.removeItem(CART_REST_KEY); }
     renderCart();
 }
 
-function changeQty(itemId, delta) {
+function changeQty(restId, itemId, delta, optionsStr = '') {
     let cart = getCart();
-    const item = cart.find(i => i.itemId === itemId);
-    if (!item) return;
-    item.quantity += delta;
-    if (item.quantity <= 0) { cart = cart.filter(i => i.itemId !== itemId); }
+    if (cart[restId]) {
+        const item = cart[restId].items.find(i => i.item_id === itemId && i.options === optionsStr);
+        if (item) {
+            item.quantity += delta;
+            if (item.quantity <= 0) {
+                cart[restId].items = cart[restId].items.filter(i => !(i.item_id === itemId && i.options === optionsStr));
+            }
+            if (cart[restId].items.length === 0) {
+                delete cart[restId];
+            }
+        }
+    }
     saveCart(cart);
-    if (cart.length === 0) localStorage.removeItem(CART_REST_KEY);
     renderCart();
 }
 
@@ -58,43 +72,65 @@ function renderCart() {
     const list = document.getElementById('cart-items-list');
     const footer = document.getElementById('cart-footer');
 
-    if (fab) fab.style.display = cart.length > 0 ? '' : 'none';
-    if (badge) badge.textContent = cart.reduce((s, i) => s + i.quantity, 0);
+    const restIds = Object.keys(cart);
+    let totalItems = 0;
+    let totalPrice = 0;
+
+    restIds.forEach(rid => {
+        cart[rid].items.forEach(i => {
+            totalItems += i.quantity;
+            totalPrice += i.price * i.quantity;
+        });
+    });
+
+    if (fab) fab.style.display = totalItems > 0 ? '' : 'none';
+    if (badge) badge.textContent = totalItems;
 
     if (!list) return;
 
-    if (cart.length === 0) {
+    if (totalItems === 0) {
         list.innerHTML = `<div class="empty-state"><div class="icon">🛒</div><p>Your cart is empty</p></div>`;
         if (footer) footer.style.display = 'none';
         return;
     }
 
-    const total = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
-    list.innerHTML = cart.map(item => `
-    <div style="display:flex;align-items:center;gap:.75rem;padding:.75rem 0;border-bottom:1px solid var(--border)">
-      <div style="flex:1">
-        <div style="font-weight:600;font-size:.9rem">${item.name}</div>
-        <div style="color:var(--primary);font-size:.88rem;font-weight:600">₹${item.price} each</div>
-      </div>
-      <div class="qty-ctrl">
-        <button class="qty-btn" onclick="changeQty('${item.itemId}',-1)">−</button>
-        <span class="qty-num">${item.quantity}</span>
-        <button class="qty-btn" onclick="changeQty('${item.itemId}',1)">+</button>
-      </div>
-      <button onclick="removeFromCart('${item.itemId}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:1.1rem">🗑</button>
-    </div>
-  `).join('');
+    let html = '';
+    restIds.forEach(rid => {
+        const rData = cart[rid];
+        html += `<div style="background:rgba(255,107,53,0.05);padding:0.5rem;border-radius:8px;margin-top:0.5rem;">
+                   <strong style="color:var(--primary);font-size:0.85rem">${rData.restaurant_name}</strong>
+                 </div>`;
+        rData.items.forEach(item => {
+            html += `
+            <div style="display:flex;align-items:center;gap:.75rem;padding:.75rem 0;border-bottom:1px solid var(--border)">
+              <div style="flex:1">
+                <div style="font-weight:600;font-size:.9rem">${item.name}</div>
+                ${item.options ? `<div style="font-size:0.75rem;color:var(--text-muted)">${item.options}</div>` : ''}
+                <div style="color:var(--primary);font-size:.88rem;font-weight:600">₹${item.price} each</div>
+              </div>
+              <div class="qty-ctrl">
+                <button class="qty-btn" onclick="changeQty('${rid}','${item.item_id}',-1,'${item.options}')">−</button>
+                <span class="qty-num">${item.quantity}</span>
+                <button class="qty-btn" onclick="changeQty('${rid}','${item.item_id}',1,'${item.options}')">+</button>
+              </div>
+              <button onclick="removeFromCart('${rid}','${item.item_id}','${item.options}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:1.1rem">🗑</button>
+            </div>
+            `;
+        });
+    });
+
+    list.innerHTML = html;
 
     if (footer) {
         footer.style.display = '';
         const totalEl = document.getElementById('cart-total');
-        if (totalEl) totalEl.textContent = `₹${total}`;
+        if (totalEl) totalEl.textContent = `₹${totalPrice}`;
     }
 }
 
 async function checkout(method = 'razorpay') {
     const cart = getCart();
-    const restId = getCartRestId();
+    const restIds = Object.keys(cart);
     const addressEl = document.getElementById('cart-address');
     const address = addressEl ? addressEl.value.trim() : '';
 
@@ -104,7 +140,7 @@ async function checkout(method = 'razorpay') {
         return;
     }
     if (!address) { showToast('Please enter a delivery address', 'error'); return; }
-    if (cart.length === 0) { showToast('Your cart is empty', 'error'); return; }
+    if (restIds.length === 0) { showToast('Your cart is empty', 'error'); return; }
 
     const payBtn = document.getElementById(method === 'cod' ? 'checkout-btn-cod' : 'checkout-btn-razorpay');
     const originalBtnHtml = payBtn ? payBtn.innerHTML : '';
@@ -112,34 +148,45 @@ async function checkout(method = 'razorpay') {
 
     // ── Cash on Delivery ──
     if (method === 'cod') {
-        const body = {
-            restaurant_id: restId,
-            items: cart.map(i => ({ item_id: i.itemId, quantity: i.quantity })),
-            address
-        };
-        const res = await apiPost('/api/order', body, true);
-        if (res.order_id) {
-            saveCart([]);
-            localStorage.removeItem(CART_REST_KEY);
+        let successCount = 0;
+        let failCount = 0;
+        
+        // Loop and send parallel order requests for each restaurant
+        await Promise.all(restIds.map(async (restId) => {
+            const body = {
+                restaurant_id: restId,
+                items: cart[restId].items.map(i => ({ item_id: i.item_id, quantity: i.quantity, options: i.options })),
+                address
+            };
+            const res = await apiPost('/api/order', body, true);
+            if (res.order_id) successCount++;
+            else failCount++;
+        }));
+
+        if (successCount > 0) {
+            saveCart({});
             renderCart();
             const sidebar = document.getElementById('cartSidebar');
             if (sidebar) { const bs = bootstrap.Offcanvas.getInstance(sidebar); if (bs) bs.hide(); }
-            showToast('Order placed successfully via COD! 🎉', 'success');
+            showToast(`Placed ${successCount} order(s) successfully via COD! 🎉`, 'success');
+            if (failCount > 0) showToast(`${failCount} order(s) failed`, 'error');
             setTimeout(() => window.location.href = '/orders.html', 1500);
         } else {
-            showToast(res.error || 'Failed to place order', 'error');
+            showToast('Failed to place orders', 'error');
             if (payBtn) { payBtn.disabled = false; payBtn.innerHTML = originalBtnHtml; }
         }
         return;
     }
 
     // ── Razorpay Payment ──
-    const total = cart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+    let totalAmount = 0;
+    restIds.forEach(rid => {
+        cart[rid].items.forEach(i => { totalAmount += i.price * i.quantity; });
+    });
 
-    const orderRes = await apiPost('/api/payment/create-order', { amount: total }, true);
+    const orderRes = await apiPost('/api/payment/create-order', { amount: totalAmount }, true);
 
     if (orderRes.error) {
-        // If testing locally and razorpay module is missing, Vercel gives 500 error which is caught as "Network error"
         let msg = orderRes.error;
         if (msg === 'Network error') {
             msg = 'Network error: Backend could not process payment. Did you install razorpay locally?';
@@ -154,32 +201,39 @@ async function checkout(method = 'razorpay') {
         amount: orderRes.amount,
         currency: orderRes.currency,
         name: 'FoodCourt',
-        description: 'Food Order Payment',
+        description: 'Multi-Restaurant Order Payment',
         order_id: orderRes.razorpay_order_id,
         prefill: {
             name: getName() || '',
         },
         theme: { color: '#ff6b35' },
         handler: async function (response) {
-            const verifyRes = await apiPost('/api/payment/verify', {
-                razorpay_order_id:   response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature:  response.razorpay_signature,
-                restaurant_id: restId,
-                items: cart.map(i => ({ item_id: i.itemId, quantity: i.quantity })),
-                address: address
-            }, true);
+            // Concurrent payment-verified order placement requests!
+            let successCount = 0;
+            let failCount = 0;
+            
+            await Promise.all(restIds.map(async (restId) => {
+                const verifyRes = await apiPost('/api/payment/verify', {
+                    razorpay_order_id:   response.razorpay_order_id,
+                    razorpay_payment_id: response.razorpay_payment_id,
+                    razorpay_signature:  response.razorpay_signature,
+                    restaurant_id: restId,
+                    items: cart[restId].items.map(i => ({ item_id: i.item_id, quantity: i.quantity, options: i.options })),
+                    address: address
+                }, true);
+                if (verifyRes.order_id) successCount++;
+                else failCount++;
+            }));
 
-            if (verifyRes.order_id) {
-                saveCart([]);
-                localStorage.removeItem(CART_REST_KEY);
+            if (successCount > 0) {
+                saveCart({});
                 renderCart();
                 const sidebar = document.getElementById('cartSidebar');
                 if (sidebar) { const bs = bootstrap.Offcanvas.getInstance(sidebar); if (bs) bs.hide(); }
-                showToast('Payment successful! Order placed 🎉', 'success');
+                showToast(`Payment successful! Placed ${successCount} order(s) 🎉`, 'success');
                 setTimeout(() => window.location.href = '/orders.html', 1500);
             } else {
-                showToast(verifyRes.error || 'Payment verification failed', 'error');
+                showToast('Payment successful but order placement failed', 'error');
                 if (payBtn) { payBtn.disabled = false; payBtn.innerHTML = originalBtnHtml; }
             }
         },
@@ -200,6 +254,8 @@ async function checkout(method = 'razorpay') {
     const rzp = new Razorpay(options);
     rzp.open();
 }
+
+
 
 // ── Restaurant listing ──────────────────────────────────
 async function loadRestaurants(query = '', cuisine = '') {
@@ -305,15 +361,16 @@ function renderSuggestions(data) {
         HTML += `<div class="suggestion-group">Dishes</div>`;
         data.menu_items.forEach(i => {
             const escapedName = i.name.replace(/'/g, "\\'");
+            const escapedRestName = i.restaurant_name.replace(/'/g, "\\'");
             HTML += `
-        <div class="suggestion-item" onclick="addToCart('${i._id}', '${escapedName}', ${i.price}, '${i.restaurant_id}')">
-          <div>
+        <div class="suggestion-item" onclick="triggerFlyingCart(event, '${i._id}'); addToCart('${i._id}', '${escapedName}', ${i.price}, '${i.restaurant_id}', '', '${escapedRestName}')">
+            <div>
             <strong>${i.name}</strong> <span class="text-primary-custom ms-2">₹${i.price}</span>
             <div class="small-text">from ${i.restaurant_name}</div>
-          </div>
-          <button class="btn-outline-custom" style="padding:0.2rem 0.6rem;font-size:0.75rem;border-radius:20px">+ Add</button>
+            </div>
+            <button class="btn-outline-custom" style="padding:0.2rem 0.6rem;font-size:0.75rem;border-radius:20px">+ Add</button>
         </div>
-      `;
+        `;
         });
     }
 

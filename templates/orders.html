@@ -135,10 +135,10 @@
           o.status !== 'rejected' ? `
         <div>
           <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:var(--text-muted);margin-bottom:.35rem">
-            <span>Pending</span><span>Accepted</span><span>Preparing</span><span>Ready</span><span>Delivered</span>
+            <span>🟠 Placed</span><span>🔵 Accepted</span><span>🔥 Cooking</span><span>🟢 Ready</span><span>✔️ Served</span>
           </div>
-          <div style="background:rgba(255,255,255,0.1);border-radius:50px;height:6px;overflow:hidden">
-            <div style="background:linear-gradient(90deg,var(--primary),#ff9f43);height:100%;width:${progress}%;transition:width 1s ease;border-radius:50px"></div>
+          <div class="order-progress-track">
+            <div class="order-progress-fill" style="width:${progress}%"></div>
           </div>
         </div>` : `<div class="status-badge status-rejected d-inline-block">Order Rejected by restaurant</div>`}
         ${reviewSection}
@@ -194,8 +194,8 @@
         }
 
         loadOrders();
-        // Auto-refresh every 30 seconds
-        setInterval(loadOrders, 30000);
+        // Auto-refresh every 8 seconds
+        setInterval(loadOrders, 8000);
     </script>
 </body>
 

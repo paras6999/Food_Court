@@ -326,3 +326,87 @@ def delete_table(table_number):
     if result.deleted_count == 0:
         return jsonify({"error": "Table not found"}), 404
     return jsonify({"message": f"Table {table_number} deleted"}), 200
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AI ANALYST
+# ══════════════════════════════════════════════════════════════════════════════
+
+import requests
+import json
+import os
+from backend.config import Config
+
+@restaurant_bp.route("/api/restaurant/ai-analyst", methods=["POST"])
+@role_required("restaurant")
+def ai_analyst():
+    rest_id = ObjectId(get_jwt_identity())
+    data = request.get_json() or {}
+    query = data.get("query", "").strip()
+
+    if not query:
+        return jsonify({"error": "Query is required"}), 400
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return jsonify({
+            "response": "⚠️ **Missing Gemini API Key!**\n\nTo use the AI Analyst, please add `GEMINI_API_KEY=your_actual_api_key` to the `.env` file and restart the server. You can get a free key from Google AI Studio."
+        }), 200
+
+    # Gather context data
+    rest = restaurants_col.find_one({"_id": rest_id}, {"password": 0})
+    orders = list(orders_col.find({"restaurant_id": rest_id}))
+    reviews = list(reviews_col.find({"restaurant_id": rest_id}))
+
+    total_revenue = sum(o.get("total_price", 0) for o in orders if o.get("status") not in ["rejected", "cancelled"])
+    total_orders = len(orders)
+    dine_in_orders = sum(1 for o in orders if o.get("order_type") == "dine-in")
+    delivery_orders = total_orders - dine_in_orders
+
+    avg_rating = rest.get("rating", 0)
+    total_ratings = rest.get("totalRatings", 0)
+
+    # Convert to concise string to avoid massive prompts
+    context = f"""
+    Restaurant Name: {rest.get('name', 'Unknown')}
+    Cuisine: {rest.get('cuisine', 'Unknown')}
+    Total Revenue: ₹{total_revenue}
+    Total Orders: {total_orders} ({dine_in_orders} Dine-in, {delivery_orders} Delivery)
+    Average Rating: {avg_rating} ⭐ from {total_ratings} reviews.
+    
+    Recent Reviews Sample:
+    """
+    for r in reviews[-5:]:
+        context += f"- {r.get('rating')}⭐: {r.get('comment')}\n"
+
+    prompt = f"""
+    You are an expert AI Restaurant Business Analyst.
+    Use the following real-time data about the user's restaurant to answer their query.
+    Keep the answer highly actionable, concise, and beautifully formatted in Markdown.
+    If the data doesn't contain the exact answer, make reasonable suggestions based on general restaurant best practices.
+    
+    Data:
+    {context}
+    
+    User Query: {query}
+    """
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.7,
+            "maxOutputTokens": 1000
+        }
+    }
+
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=10)
+        r_json = r.json()
+        if r.status_code == 200:
+            text = r_json["candidates"][0]["content"]["parts"][0]["text"]
+            return jsonify({"response": text}), 200
+        else:
+            return jsonify({"response": f"⚠️ **API Error:** {r_json.get('error', {}).get('message', 'Unknown error')}"}), 200
+    except Exception as e:
+        return jsonify({"response": f"⚠️ **Connection Error:** Failed to connect to Gemini API. {str(e)}"}), 200

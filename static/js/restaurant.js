@@ -60,6 +60,19 @@ async function loadRevenueGraph() {
 
 // ── Orders ──────────────────────────────────────────────
 let previousOrderCount = null;
+let currentOrderView = 'table'; // 'table' or 'kanban'
+
+function setOrderView(view) {
+    currentOrderView = view;
+    document.getElementById('btn-view-table').classList.toggle('active', view === 'table');
+    document.getElementById('btn-view-kanban').classList.toggle('active', view === 'kanban');
+    
+    // Switch table-responsive parent instead of the table element itself to hide the whole wrapper
+    document.querySelector('.table-responsive').style.display = view === 'table' ? '' : 'none';
+    document.getElementById('orders-kanban-view').style.display = view === 'kanban' ? '' : 'none';
+    
+    loadOrders();
+}
 
 async function loadOrders() {
   const filter = document.getElementById('status-filter')?.value || '';
@@ -112,7 +125,7 @@ async function loadOrders() {
       </div>`;
     }
 
-    const actions = buildOrderActions(o._id, o.status);
+    const actions = buildOrderActions(o);
     return `
     <tr class="${isDineIn && o.status === 'pending' ? 'dine-in-highlight' : ''}">
       <td><code style="color:var(--primary)">#${shortId}</code></td>
@@ -124,20 +137,83 @@ async function loadOrders() {
       <td>${actions}</td>
     </tr>`;
   }).join('');
+  
+  // -- KANBAN VIEW POPULATION --
+  const kPending = document.getElementById('kb-pending-col');
+  const kPrep = document.getElementById('kb-prep-col');
+  const kDone = document.getElementById('kb-done-col');
+  
+  if(kPending) {
+      let pendingOrders = orders.filter(o => o.status === 'pending' || o.status === 'accepted');
+      let prepOrders = orders.filter(o => o.status === 'preparing' || o.status === 'ready');
+      let doneOrders = orders.filter(o => o.status === 'delivered' || o.status === 'rejected');
+      
+      document.getElementById('kb-pending-count').textContent = pendingOrders.length;
+      document.getElementById('kb-prep-count').textContent = prepOrders.length;
+      document.getElementById('kb-done-count').textContent = doneOrders.length;
+      
+      const renderKanbanCard = (o) => {
+        const items = o.items.map(i => `${i.quantity}× ${i.name}`).join(', ');
+        const date = new Date(o.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        const shortId = o._id.slice(-6).toUpperCase();
+        const isDineIn = o.order_type === 'dine-in' || o.table_number;
+        const isServiceReq = o.order_type === 'service-request';
+        
+        let header = isServiceReq ? '🙋 Service' : (isDineIn ? `🪑 Table ${o.table_number}` : '🚚 Delivery');
+        let actions = buildOrderActions(o);
+        
+        return `<div class="fc-card p-2 shadow-sm mb-2" style="border-left: 3px solid ${isDineIn?'var(--primary)':'var(--text-muted)'}; background: var(--surface)">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="badge ${isDineIn ? 'bg-primary' : 'bg-secondary'}">${header}</span>
+                <small style="color:var(--text-muted)">${date}</small>
+            </div>
+            <div style="font-size:0.85rem; font-weight: 600; margin-bottom: 4px;">#${shortId} <span style="float:right; color:var(--primary)">${isServiceReq ? '' : '₹' + o.total_price}</span></div>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom: 8px; line-height: 1.3;">${isServiceReq ? o.request_type : items}</div>
+            <div class="d-flex flex-wrap gap-1">${actions}</div>
+        </div>`;
+      };
+      
+      kPending.innerHTML = pendingOrders.map(renderKanbanCard).join('');
+      kPrep.innerHTML = prepOrders.map(renderKanbanCard).join('');
+      kDone.innerHTML = doneOrders.map(renderKanbanCard).join('');
+  }
 }
 
-function buildOrderActions(orderId, status) {
+function buildOrderActions(o) {
   const btn = (label, newStatus, icon) =>
     `<button class="btn-outline-custom" style="padding:.3rem .75rem;font-size:.78rem;margin:.15rem"
-      onclick="updateOrderStatus('${orderId}','${newStatus}')"><i class="bi ${icon}"></i> ${label}</button>`;
+      onclick="updateOrderStatus('${o._id}','${newStatus}')"><i class="bi ${icon}"></i> ${label}</button>`;
 
-  switch (status) {
-    case 'pending': return btn('Accept', 'accepted', 'bi-check-circle') + btn('Reject', 'rejected', 'bi-x-circle');
-    case 'accepted': return btn('Preparing', 'preparing', 'bi-fire');
-    case 'preparing': return btn('Ready', 'ready', 'bi-bell');
-    case 'ready': return btn('Delivered', 'delivered', 'bi-truck');
-    default: return `<span style="color:var(--text-muted);font-size:.82rem">${status}</span>`;
+  const billBtn = (icon, label, action) => 
+    `<button class="btn-outline-custom" style="padding:.3rem .75rem;font-size:.78rem;margin:.15rem; border-color: #20c997; color: #20c997"
+      onclick="${action}"><i class="bi ${icon}"></i> ${label}</button>`;
+
+  const wpMsg = encodeURIComponent(
+    `*🧾 Invoice from ${localStorage.getItem('fc_name') || 'FoodCourt'}*\n` +
+    `*Order ID:* ${o._id.slice(-6).toUpperCase()}\n` +
+    `*Date:* ${new Date(o.created_at).toLocaleTimeString()}\n\n` +
+    o.items.map(i => `▪ ${i.quantity}x ${i.name} - ₹${i.price * i.quantity}`).join('\n') +
+    `\n\n*Total:* ₹${o.total_price}\n\n` +
+    `*View Receipt:* ${window.location.origin}/bill/${o._id}`
+  );
+
+  let actions = '';
+  switch (o.status) {
+    case 'pending': actions = btn('Accept', 'accepted', 'bi-check-circle') + btn('Reject', 'rejected', 'bi-x-circle'); break;
+    case 'accepted': actions = btn('Preparing', 'preparing', 'bi-fire'); break;
+    case 'preparing': actions = btn('Ready', 'ready', 'bi-bell'); break;
+    case 'ready': actions = btn('Delivered', 'delivered', 'bi-truck'); break;
+    default: actions = `<span style="color:var(--text-muted);font-size:.82rem">${o.status}</span>`; break;
   }
+
+  // If order is ready or delivered, show billing options
+  if (o.status === 'ready' || o.status === 'delivered') {
+    if (o.order_type !== 'service-request') {
+      actions += `<br>` + billBtn('bi-printer', 'Print', `window.open('/bill/${o._id}', '_blank')`);
+      actions += billBtn('bi-whatsapp', 'WhatsApp', `window.open('https://wa.me/?text=${wpMsg}', '_blank')`);
+    }
+  }
+  return actions;
 }
 
 async function updateOrderStatus(orderId, newStatus) {
@@ -173,9 +249,15 @@ async function loadMenu() {
         <div class="details">
           <div class="name">${item.name}</div>
           <div class="price">₹${item.price}</div>
-          <small style="color:${item.available ? '#20c997' : 'var(--accent)'}">
-            ${item.available ? '✅ Available' : '❌ Unavailable'}
-          </small>
+          <div class="mt-2 d-flex align-items-center gap-2">
+            <label class="theme-switch" style="transform: scale(0.7); margin: 0; transform-origin: left">
+              <input type="checkbox" onchange="toggleItemAvailability('${item._id}', this.checked)" ${item.available ? 'checked' : ''}>
+              <div class="slider round"></div>
+            </label>
+            <small style="color:${item.available ? '#20c997' : 'var(--text-muted)'}" id="avail-label-${item._id}">
+              ${item.available ? 'Available' : 'Out of Stock'}
+            </small>
+          </div>
         </div>
         <div class="d-flex flex-column gap-2 ms-auto">
           <button class="btn-outline-custom" style="padding:.3rem .7rem;font-size:.78rem" onclick="openEditModal('${item._id}')">
@@ -267,6 +349,37 @@ async function deleteMenuItem(itemId, name) {
   const res = await apiDelete(`/api/menu/delete/${itemId}`);
   if (res.message) { showToast('Item deleted', 'success'); loadMenu(); }
   else showToast(res.error || 'Delete failed', 'error');
+}
+
+async function toggleItemAvailability(itemId, isAvailable) {
+  const item = menuItems.find(i => i._id === itemId);
+  if (!item) return;
+  
+  // Use FormData so we match the backend format for /api/menu/update
+  const fd = new FormData();
+  fd.append('name', item.name);
+  fd.append('price', item.price);
+  fd.append('available', isAvailable);
+
+  const res = await fetch(`/api/menu/update/${itemId}`, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${getToken()}` },
+      body: fd
+  });
+  const data = await res.json();
+  
+  if (data.message) {
+      showToast(isAvailable ? 'Item marked Available' : 'Item marked Out of Stock', 'success');
+      item.available = isAvailable;
+      const label = document.getElementById(`avail-label-${itemId}`);
+      if(label) {
+          label.textContent = isAvailable ? 'Available' : 'Out of Stock';
+          label.style.color = isAvailable ? '#20c997' : 'var(--text-muted)';
+      }
+  } else {
+      showToast(data.error || 'Failed to update stock', 'error');
+      loadMenu(); // revert UI if failed
+  }
 }
 
 // ── Reviews ─────────────────────────────────────────────
@@ -431,4 +544,82 @@ async function deleteTable(tableNumber) {
   } else {
     showToast(res.error || 'Delete failed', 'error');
   }
+}
+
+// ══════════════════════════════════════════════════════════
+// AI ANALYST CHAT
+// ══════════════════════════════════════════════════════════
+
+let aiChatOpen = false;
+
+function toggleAIChat() {
+    const panel = document.getElementById('ai-chat-panel');
+    aiChatOpen = !aiChatOpen;
+    if (aiChatOpen) {
+        panel.style.transform = 'translateY(0)';
+    } else {
+        panel.style.transform = 'translateY(120%)';
+    }
+}
+
+function handleAIQuery(e) {
+    e.preventDefault();
+    const input = document.getElementById('ai-chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    sendAIQuery(text);
+}
+
+// Simple markdown to HTML formatter for the AI responses
+function parseMarkdown(text) {
+    let html = text
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/\n/g, '<br>');
+    return html;
+}
+
+async function sendAIQuery(query) {
+    if (!aiChatOpen) toggleAIChat();
+    
+    const messages = document.getElementById('ai-chat-messages');
+    
+    // Append user message
+    const userMsg = document.createElement('div');
+    userMsg.style.cssText = 'background:var(--primary); color:white; padding:0.8rem; border-radius:8px; align-self:flex-end; max-width:85%;';
+    userMsg.textContent = query;
+    messages.appendChild(userMsg);
+    
+    // Append loading indicator
+    const typingMsg = document.createElement('div');
+    typingMsg.style.cssText = 'background:var(--card-bg); padding:0.8rem; border-radius:8px; align-self:flex-start; border:1px solid var(--border); max-width:85%; color:var(--text-muted);';
+    typingMsg.innerHTML = '<span class="spinner-grow spinner-grow-sm" role="status" aria-hidden="true"></span> Thinking...';
+    messages.appendChild(typingMsg);
+    
+    messages.scrollTop = messages.scrollHeight;
+    
+    try {
+        const res = await apiPost('/api/restaurant/ai-analyst', { query }, true);
+        typingMsg.remove();
+        
+        const aiMsg = document.createElement('div');
+        aiMsg.style.cssText = 'background:var(--card-bg); padding:0.8rem; border-radius:8px; align-self:flex-start; border:1px solid var(--border); max-width:85%; line-height: 1.5;';
+        
+        if (res.error) {
+            aiMsg.innerHTML = `<span style="color:var(--accent)">${res.error}</span>`;
+        } else {
+            aiMsg.innerHTML = parseMarkdown(res.response);
+        }
+        
+        messages.appendChild(aiMsg);
+    } catch (e) {
+        typingMsg.remove();
+        const errMsg = document.createElement('div');
+        errMsg.style.cssText = 'background:var(--card-bg); padding:0.8rem; border-radius:8px; align-self:flex-start; border:1px solid var(--accent); color:var(--accent); max-width:85%;';
+        errMsg.textContent = 'Failed to connect to AI server.';
+        messages.appendChild(errMsg);
+    }
+    
+    messages.scrollTop = messages.scrollHeight;
 }
