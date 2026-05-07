@@ -15,8 +15,12 @@ async function loadDashboard() {
 
   // Load current offer to input if it exists
   const offerInput = document.getElementById('offer-input');
-  if (offerInput && data.restaurant) {
-    offerInput.value = data.restaurant.offer || '';
+  const discountInput = document.getElementById('discount-pct-input');
+  const couponToggle = document.getElementById('coupon-toggle');
+  if (data.restaurant) {
+    if (offerInput) offerInput.value = data.restaurant.offer || '';
+    if (discountInput) discountInput.value = data.restaurant.discount_pct || '';
+    if (couponToggle) couponToggle.checked = data.restaurant.allow_coupons !== false; // Default to true
   }
 }
 
@@ -415,7 +419,14 @@ async function loadReviews() {
 // ── Offers ──────────────────────────────────────────────
 async function saveOffer() {
   const offerText = document.getElementById('offer-input').value.trim();
-  const res = await apiPost('/api/restaurant/offer', { offer: offerText }, true);
+  const discountPct = document.getElementById('discount-pct-input').value.trim();
+  const allowCoupons = document.getElementById('coupon-toggle').checked;
+  
+  const res = await apiPost('/api/restaurant/offer', { 
+    offer: offerText, 
+    discount_pct: discountPct,
+    allow_coupons: allowCoupons
+  }, true);
 
   if (res.message) {
     showToast('Offer updated successfully! 🏷️', 'success');
@@ -554,11 +565,14 @@ let aiChatOpen = false;
 
 function toggleAIChat() {
     const panel = document.getElementById('ai-chat-panel');
+    const trigger = document.getElementById('ai-chat-trigger');
     aiChatOpen = !aiChatOpen;
     if (aiChatOpen) {
         panel.style.transform = 'translateY(0)';
+        trigger.style.display = 'none';
     } else {
         panel.style.transform = 'translateY(120%)';
+        setTimeout(() => trigger.style.display = 'flex', 300);
     }
 }
 
@@ -581,6 +595,12 @@ function parseMarkdown(text) {
 }
 
 async function sendAIQuery(query) {
+    if (!query) {
+        const input = document.getElementById('ai-chat-input');
+        query = input.value.trim();
+        if (!query) return;
+        input.value = '';
+    }
     if (!aiChatOpen) toggleAIChat();
     
     const messages = document.getElementById('ai-chat-messages');
@@ -622,4 +642,9 @@ async function sendAIQuery(query) {
     }
     
     messages.scrollTop = messages.scrollHeight;
+}
+
+function quickAIQuery(query) {
+    document.getElementById('ai-chat-input').value = query;
+    sendAIQuery();
 }

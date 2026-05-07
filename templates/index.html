@@ -140,21 +140,13 @@
                                 <p>Scan the QR code on your table to browse the menu & order instantly</p>
                                 <span class="dinein-card-action">Scan Now <i class="bi bi-arrow-right"></i></span>
                             </div>
-                            <div class="dinein-card" onclick="document.getElementById('table-url-section').style.display=''">
+                            <div class="dinein-card" onclick="openFloorPlanModal()">
                                 <div class="dinein-card-icon reserve">
-                                    <i class="bi bi-calendar-check"></i>
+                                    <i class="bi bi-map"></i>
                                 </div>
-                                <h3>Enter Table Link</h3>
-                                <p>Got a table URL? Paste it here to start ordering from your table</p>
-                                <span class="dinein-card-action">Enter Link <i class="bi bi-arrow-right"></i></span>
-                            </div>
-                        </div>
-                        <!-- Manual URL entry -->
-                        <div id="table-url-section" style="display:none" class="mt-4">
-                            <div class="search-wrapper">
-                                <i class="bi bi-link-45deg ms-3" style="color:var(--text-muted)"></i>
-                                <input type="text" id="table-url-input" placeholder="Paste your table URL here…">
-                                <button class="btn-primary-custom" onclick="goToTableUrl()"><i class="bi bi-arrow-right"></i> Go</button>
+                                <h3>Interactive Floor Plan</h3>
+                                <p>Select your restaurant and pick a table visually from the map</p>
+                                <span class="dinein-card-action">View Map <i class="bi bi-arrow-right"></i></span>
                             </div>
                         </div>
                     </div>
@@ -238,9 +230,34 @@
             <div id="cart-items-list" class="flex-grow-1"></div>
             <div id="cart-footer"
                 style="display:none; border-top:1px solid var(--border); padding-top:1rem; margin-top:1rem;">
+                <div class="mb-3">
+                    <label class="fc-label">Coupon Code</label>
+                    <div class="d-flex gap-2">
+                        <input type="text" class="fc-input" id="cart-coupon" placeholder="Enter coupon..." style="flex:1; text-transform:uppercase;">
+                        <button class="btn btn-outline-custom" onclick="applyCoupon()" style="padding: 0 1rem; border-color:var(--border); color:var(--text);">Apply</button>
+                    </div>
+                    <div id="coupon-message" style="font-size: 0.85rem; margin-top: 0.25rem;"></div>
+                </div>
+                <div class="mb-3" id="cart-points-container" style="display:none;">
+                    <div class="form-check d-flex align-items-center gap-2" style="background:rgba(255,107,53,0.1); padding:0.5rem 1rem; border-radius:8px; border:1px solid rgba(255,107,53,0.2);">
+                        <input class="form-check-input" type="checkbox" id="cart-use-points" onchange="renderCart()" style="margin-top:0;">
+                        <label class="form-check-label mb-0 w-100 d-flex justify-content-between align-items-center" for="cart-use-points" style="color:var(--text-primary); cursor:pointer;">
+                            <span id="cart-points-label"><i class="bi bi-star-fill text-warning"></i> Use 0 Points</span>
+                            <strong class="text-success" id="cart-points-savings">Save ₹0</strong>
+                        </label>
+                    </div>
+                </div>
                 <div class="d-flex justify-content-between mb-2">
                     <span style="color:var(--text-muted)">Subtotal</span>
-                    <strong id="cart-total">$0.00</strong>
+                    <strong id="cart-subtotal">$0.00</strong>
+                </div>
+                <div class="d-flex justify-content-between mb-2 text-success" id="cart-discount-row" style="display:none !important;">
+                    <span>Discount</span>
+                    <strong id="cart-discount">-$0.00</strong>
+                </div>
+                <div class="d-flex justify-content-between mb-3 border-top pt-2" style="border-color:var(--border) !important;">
+                    <span style="font-weight:bold;">Total</span>
+                    <strong id="cart-total" style="font-size:1.1rem; color:var(--primary);">$0.00</strong>
                 </div>
                 <div class="mb-3">
                     <label class="fc-label">Delivery Address</label>
@@ -424,12 +441,90 @@
             else showToast('Please enter a valid table URL', 'error');
         }
 
-        function goToTableUrl() {
-            const url = document.getElementById('table-url-input').value.trim();
-            if (url) window.location.href = url;
-            else showToast('Please enter a valid table URL', 'error');
+        let currentFloorPlanRestId = null;
+
+        function openFloorPlanModal() {
+            const modal = new bootstrap.Modal(document.getElementById('floorPlanModal'));
+            modal.show();
+            
+            // Populate restaurant selector
+            const select = document.getElementById('floorplan-restaurant-select');
+            select.innerHTML = '<option value="">Select a restaurant...</option>';
+            window.allRestaurants.forEach(r => {
+                select.innerHTML += `<option value="${r._id}">${r.name} (${r.cuisine})</option>`;
+            });
+            document.getElementById('floorplan-map-container').innerHTML = '<div class="text-center py-4" style="color:var(--text-muted)">Please select a restaurant to view its floor plan.</div>';
+        }
+
+        async function loadFloorPlan() {
+            const restId = document.getElementById('floorplan-restaurant-select').value;
+            const container = document.getElementById('floorplan-map-container');
+            if (!restId) {
+                container.innerHTML = '<div class="text-center py-4" style="color:var(--text-muted)">Please select a restaurant to view its floor plan.</div>';
+                return;
+            }
+            
+            container.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div><p class="mt-2">Loading tables...</p></div>';
+            
+            try {
+                const response = await fetch(`/api/restaurant/${restId}/tables`);
+                const tables = await response.json();
+                
+                if (!tables || tables.length === 0) {
+                    container.innerHTML = '<div class="text-center py-4" style="color:var(--text-muted)">No tables found for this restaurant.</div>';
+                    return;
+                }
+                
+                let html = '<div class="d-flex flex-wrap gap-3 justify-content-center mt-3">';
+                tables.forEach(t => {
+                    const statusColor = t.status === 'available' ? '#20c997' : (t.status === 'occupied' ? '#ff6b35' : '#f59f00');
+                    const isAvailable = t.status === 'available';
+                    html += `
+                    <div style="width:100px; height:100px; border-radius:12px; border:2px solid ${statusColor}; background:rgba(${isAvailable ? '32,201,151' : '255,107,53'}, 0.1); display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:${isAvailable ? 'pointer' : 'not-allowed'}; opacity:${isAvailable ? '1' : '0.6'}; transition:transform 0.2s;" ${isAvailable ? `onclick="window.location.href='/customer_table.html?restaurant=${restId}&table=${t.table_number}'" onmouseover="this.style.transform='scale(1.05)'" onmouseout="this.style.transform='scale(1)'"` : ''}>
+                        <i class="bi bi-geo-alt-fill" style="color:${statusColor}; font-size:1.5rem; margin-bottom:5px;"></i>
+                        <span style="font-weight:bold; color:var(--text-primary);">Table ${t.table_number}</span>
+                        <span style="font-size:0.75rem; color:${statusColor}; text-transform:capitalize;">${t.status}</span>
+                    </div>`;
+                });
+                html += '</div>';
+                
+                // Add a legend
+                html += `
+                <div class="d-flex justify-content-center gap-4 mt-4 text-muted" style="font-size:0.85rem;">
+                    <div class="d-flex align-items-center gap-1"><span style="display:inline-block;width:12px;height:12px;background:#20c997;border-radius:50%;"></span> Available</div>
+                    <div class="d-flex align-items-center gap-1"><span style="display:inline-block;width:12px;height:12px;background:#ff6b35;border-radius:50%;"></span> Occupied</div>
+                    <div class="d-flex align-items-center gap-1"><span style="display:inline-block;width:12px;height:12px;background:#f59f00;border-radius:50%;"></span> Needs Cleaning</div>
+                </div>`;
+                
+                container.innerHTML = html;
+            } catch (e) {
+                container.innerHTML = '<div class="text-center py-4" style="color:var(--accent)">Failed to load floor plan.</div>';
+            }
         }
     </script>
+    
+    <!-- Floor Plan Modal -->
+    <div class="modal fade" id="floorPlanModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content" style="background:var(--surface); border:1px solid var(--border)">
+                <div class="modal-header" style="border-bottom:1px solid var(--border)">
+                    <h5 class="modal-title"><i class="bi bi-map"></i> Interactive Floor Plan</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-4">
+                        <label class="fc-label">Select Restaurant</label>
+                        <select id="floorplan-restaurant-select" class="fc-input" onchange="loadFloorPlan()">
+                            <option value="">Select a restaurant...</option>
+                        </select>
+                    </div>
+                    <div id="floorplan-map-container" style="min-height:250px; background:var(--card-bg); border-radius:12px; padding:1.5rem; border:1px solid var(--border);">
+                        <!-- Tables will be rendered here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 
 </html>

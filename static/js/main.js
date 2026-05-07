@@ -12,13 +12,13 @@ function getUserId() { return localStorage.getItem('fc_id'); }
 
 function authHeaders() {
   const t = getToken();
-  return t ? { 'Content-Type': 'application/json', 'Authorization': `Bearer ${t}` }
-           : { 'Content-Type': 'application/json' };
+  return t ? { 'Authorization': `Bearer ${t}` }
+           : {};
 }
 
 // ── Fetch wrappers ──────────────────────────────────────
 async function apiFetch(path, withAuth = false) {
-  const headers = withAuth ? authHeaders() : { 'Content-Type': 'application/json' };
+  const headers = withAuth ? authHeaders() : {};
   try {
     const r = await fetch(API + path, { headers });
     return await r.json();
@@ -52,6 +52,79 @@ async function apiPut(path, body) {
     return await r.json();
   } catch (err) {
     return { error: 'Network error' };
+  }
+}
+
+// ── Coupons & Points ──────────────────────────────────────────────
+window.appliedCoupon = null;
+window.couponDiscountAmount = 0;
+window.userFcPoints = 0;
+
+async function loadUserProfile() {
+    if (getRole() === 'customer' && getToken()) {
+        const profile = await apiFetch('/api/user/profile', true);
+        if (profile && !profile.error) {
+            window.userFcPoints = profile.fc_points || 0;
+            
+            // Update points UI in cart
+            const pointsContainer = document.getElementById('cart-points-container');
+            const pointsLabel = document.getElementById('cart-points-label');
+            
+            if (pointsContainer && window.userFcPoints > 0) {
+                pointsContainer.style.display = 'block';
+                if (pointsLabel) pointsLabel.innerHTML = `<i class="bi bi-star-fill text-warning"></i> Use ${window.userFcPoints} Points`;
+            }
+        }
+    }
+}
+
+// Call on load
+document.addEventListener('DOMContentLoaded', loadUserProfile);
+
+async function applyCoupon(restaurantId = null) {
+  const codeInput = document.getElementById('cart-coupon');
+  const msgEl = document.getElementById('coupon-message');
+  if (!codeInput || !msgEl) return;
+  
+  const code = codeInput.value.trim().toUpperCase();
+  if (!code) {
+    msgEl.innerHTML = '<span class="text-danger">Please enter a coupon code.</span>';
+    return;
+  }
+  
+  // Need to get current subtotal from UI or global logic
+  let subtotal = 0;
+  if (typeof window.getCartSubtotal === 'function') {
+      subtotal = window.getCartSubtotal();
+  } else {
+      // Fallback: try to read from DOM if no function available
+      const subEl = document.getElementById('cart-subtotal');
+      if (subEl) subtotal = parseFloat(subEl.textContent.replace('₹', '').replace('$', ''));
+  }
+  
+  msgEl.innerHTML = '<span style="color:var(--text-muted)">Validating...</span>';
+  
+  const payload = { code, subtotal };
+  if (restaurantId) payload.restaurant_id = restaurantId;
+  
+  const res = await apiPost('/api/coupon/validate', payload, true);
+  if (res.valid) {
+      window.appliedCoupon = code;
+      window.couponDiscountAmount = res.discount_amount;
+      msgEl.innerHTML = `<span class="text-success">${res.message}</span>`;
+      showToast(`Coupon applied! Saved ₹${res.discount_amount}`, 'success');
+      
+      // Trigger cart re-render to update totals
+      if (typeof renderCart === 'function') renderCart();
+      if (typeof renderTableCart === 'function') renderTableCart();
+  } else {
+      window.appliedCoupon = null;
+      window.couponDiscountAmount = 0;
+      msgEl.innerHTML = `<span class="text-danger">${res.error || res.message || 'Invalid coupon'}</span>`;
+      
+      // Trigger cart re-render to reset totals
+      if (typeof renderCart === 'function') renderCart();
+      if (typeof renderTableCart === 'function') renderTableCart();
   }
 }
 

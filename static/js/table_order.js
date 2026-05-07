@@ -12,6 +12,11 @@ let tableCart = [];
 let restaurantData = null;
 let menuData = [];
 
+// ── Group Ordering ──────────────────────────────────────
+let isGroupOrder = false;
+let groupCartData = null;
+let groupSyncInterval = null;
+
 // ── Init ────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   updateAuthUI();
@@ -84,6 +89,11 @@ async function validateTable() {
       document.getElementById('offer-text').textContent = restaurantData.offer;
     }
 
+    // Show group order button if logged in
+    if (getToken() && getRole() === 'customer') {
+      document.getElementById('start-group-order').style.display = '';
+    }
+
     renderMenu();
 
     loadEl.style.display = 'none';
@@ -99,6 +109,62 @@ async function validateTable() {
     loadEl.style.display = 'none';
     errEl.style.display = '';
     document.getElementById('error-msg').textContent = 'Unable to connect. Please try again.';
+  }
+}
+
+async function startGroupOrder() {
+  if (!getToken() || getRole() !== 'customer') {
+    showToast('Please login to start a group order', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('start-group-order');
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting…';
+  btn.disabled = true;
+
+  try {
+    const res = await apiPost('/api/cart/group/join', {
+      restaurant_id: restaurantId,
+      table_number: tableNumber
+    }, true);
+
+    if (res.cart) {
+      isGroupOrder = true;
+      groupCartData = res.cart;
+      tableCart = []; // Clear local cart
+      renderTableCart();
+
+      // Start polling for updates
+      groupSyncInterval = setInterval(syncGroupCart, 3000);
+
+      btn.innerHTML = '👥 Group Order Active';
+      btn.disabled = true;
+      btn.style.background = 'linear-gradient(45deg, #28a745, #20c997)';
+
+      showToast('Group order started! Others can now join.', 'success');
+    } else {
+      showToast(res.error || 'Failed to start group order', 'error');
+      btn.innerHTML = '👥 Start Group Order';
+      btn.disabled = false;
+    }
+  } catch (err) {
+    showToast('Network error', 'error');
+    btn.innerHTML = '👥 Start Group Order';
+    btn.disabled = false;
+  }
+}
+
+async function syncGroupCart() {
+  if (!isGroupOrder) return;
+
+  try {
+    const res = await apiFetch(`/api/cart/group/sync?restaurant_id=${restaurantId}&table_number=${tableNumber}`, true);
+    if (res.cart) {
+      groupCartData = res.cart;
+      renderTableCart();
+    }
+  } catch (err) {
+    // Silent fail for polling
   }
 }
 
@@ -140,7 +206,19 @@ function renderMenu() {
     return;
   }
 
-  grid.innerHTML = filtered.map((item, idx) => `
+    const isLoggedIn = !!localStorage.getItem('fc_token');
+    const discount = isLoggedIn && restaurantData && restaurantData.discount_pct ? parseFloat(restaurantData.discount_pct) : 0;
+    
+    grid.innerHTML = filtered.map((item, idx) => {
+        let priceHtml = '';
+        if (discount > 0) {
+            const discountedPrice = (item.price * (1 - discount / 100)).toFixed(2);
+            priceHtml = `<span style="text-decoration:line-through; color:var(--text-muted); font-size:0.85rem">₹${item.price}</span> <span style="color: #20c997; font-weight: bold;">₹${discountedPrice}</span>`;
+        } else {
+            priceHtml = `₹${item.price}`;
+        }
+        
+        return `
     <div class="col-12 col-md-6" style="animation-delay:${idx * 0.05}s">
       <div class="menu-card" style="cursor:pointer" onclick="openItemDetails('${item._id}', '${item.name.replace(/'/g, "\\'")}', ${item.price}, '${restaurantId}', '${item.restName}', '${item.image || ''}', '${item.description || ''}', ${item.isVeg})">
         <img src="${item.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200'}" alt="${item.name}"
@@ -150,7 +228,7 @@ function renderMenu() {
               ${item.isVeg ? '<span style="font-size:0.7rem">🟢</span>' : '<span style="font-size:0.7rem">🔴</span>'}
               ${item.name}
           </div>
-          <div class="price">₹${item.price}</div>
+          <div class="price">${priceHtml}</div>
         </div>
         <div class="ms-auto">
           <button class="btn-primary-custom" style="padding:0.45rem 1rem;font-size:0.85rem"
@@ -160,11 +238,16 @@ function renderMenu() {
         </div>
       </div>
     </div>
-  `).join('');
+  `}).join('');
 }
 
 // ── Cart Logic ──────────────────────────────────────────
 function addToTableCart(itemId, name, price, optionsStr = '') {
+  if (isGroupOrder) {
+    addToGroupCart(itemId, name, price, optionsStr);
+    return;
+  }
+
   const existing = tableCart.find(i => i.itemId === itemId && i.options === optionsStr);
   if (existing) {
     existing.quantity += 1;
@@ -175,17 +258,90 @@ function addToTableCart(itemId, name, price, optionsStr = '') {
   showToast(`${name} added to order 🛒`, 'success');
 }
 
+async function addToGroupCart(itemId, name, price, optionsStr = '') {
+  try {
+    const res = await apiPost('/api/cart/group/add', {
+      restaurant_id: restaurantId,
+      table_number: tableNumber,
+      item_id: itemId,
+      quantity: 1,
+      options: optionsStr
+    }, true);
+
+    if (res.cart) {
+      groupCartData = res.cart;
+      renderTableCart();
+      showToast(`${name} added to group order 🛒`, 'success');
+    } else {
+      showToast(res.error || 'Failed to add item', 'error');
+    }
+  } catch (err) {
+    showToast('Network error', 'error');
+  }
+}
+
 function removeFromTableCart(itemId, optionsStr = '') {
+  if (isGroupOrder) {
+    // For group cart, we need to remove the item from backend
+    removeFromGroupCart(itemId, optionsStr);
+    return;
+  }
+
   tableCart = tableCart.filter(i => !(i.itemId === itemId && i.options === optionsStr));
   renderTableCart();
 }
 
 function changeTableQty(itemId, delta, optionsStr = '') {
+  if (isGroupOrder) {
+    changeGroupQty(itemId, delta, optionsStr);
+    return;
+  }
+
   const item = tableCart.find(i => i.itemId === itemId && i.options === optionsStr);
   if (!item) return;
   item.quantity += delta;
   if (item.quantity <= 0) tableCart = tableCart.filter(i => !(i.itemId === itemId && i.options === optionsStr));
   renderTableCart();
+}
+
+async function removeFromGroupCart(itemKey) {
+  try {
+    const res = await apiPost('/api/cart/group/remove', {
+      restaurant_id: restaurantId,
+      table_number: tableNumber,
+      item_key: itemKey
+    }, true);
+
+    if (res.cart) {
+      groupCartData = res.cart;
+      renderTableCart();
+      showToast('Item removed from group order', 'success');
+    } else {
+      showToast(res.error || 'Failed to remove item', 'error');
+    }
+  } catch (err) {
+    showToast('Network error', 'error');
+  }
+}
+
+async function updateGroupCartQuantity(itemKey, quantity) {
+  try {
+    const res = await apiPost('/api/cart/group/update-quantity', {
+      restaurant_id: restaurantId,
+      table_number: tableNumber,
+      item_key: itemKey,
+      quantity: quantity
+    }, true);
+
+    if (res.cart) {
+      groupCartData = res.cart;
+      renderTableCart();
+    } else {
+      showToast(res.error || 'Failed to update quantity', 'error');
+    }
+  } catch (err) {
+    showToast('Network error', 'error');
+  }
 }
 
 function renderTableCart() {
@@ -194,44 +350,88 @@ function renderTableCart() {
   const list = document.getElementById('cart-items-list');
   const footer = document.getElementById('cart-footer');
 
-  if (fab) fab.style.display = tableCart.length > 0 ? '' : 'none';
-  if (badge) badge.textContent = tableCart.reduce((s, i) => s + i.quantity, 0);
+  let cartItems = [];
+  let total = 0;
+
+  if (isGroupOrder && groupCartData) {
+    cartItems = groupCartData.items || [];
+    total = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  } else {
+    cartItems = tableCart;
+    total = tableCart.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  }
+
+  if (fab) fab.style.display = cartItems.length > 0 ? '' : 'none';
+  if (badge) badge.textContent = cartItems.reduce((s, i) => s + i.quantity, 0);
 
   if (!list) return;
 
-  if (tableCart.length === 0) {
-    list.innerHTML = `<div class="empty-state"><div class="icon">🛒</div><p>Your order is empty</p></div>`;
+  if (cartItems.length === 0) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">🛒</div><p>Your ${isGroupOrder ? 'group ' : ''}order is empty</p></div>`;
     if (footer) footer.style.display = 'none';
     return;
   }
 
-  const total = tableCart.reduce((sum, i) => sum + i.price * i.quantity, 0);
-  list.innerHTML = tableCart.map(item => `
+  list.innerHTML = cartItems.map(item => `
     <div style="display:flex;align-items:center;gap:.75rem;padding:.75rem 0;border-bottom:1px solid var(--border)">
       <div style="flex:1">
         <div style="font-weight:600;font-size:.9rem">${item.name}</div>
         ${item.options ? `<div style="font-size:0.75rem;color:var(--text-muted)">${item.options}</div>` : ''}
+        ${isGroupOrder && item.added_by ? `<div style="font-size:0.7rem;color:var(--primary);font-style:italic">Added by ${item.added_by}</div>` : ''}
         <div style="color:var(--primary);font-size:.88rem;font-weight:600">₹${item.price} each</div>
       </div>
+      ${!isGroupOrder ? `
       <div class="qty-ctrl">
         <button class="qty-btn" onclick="changeTableQty('${item.itemId}',-1,'${item.options}')">−</button>
         <span class="qty-num">${item.quantity}</span>
         <button class="qty-btn" onclick="changeTableQty('${item.itemId}',1,'${item.options}')">+</button>
       </div>
       <button onclick="removeFromTableCart('${item.itemId}','${item.options}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:1.1rem">🗑</button>
+      ` : `
+      <div class="qty-ctrl">
+        <button class="qty-btn" onclick="updateGroupCartQuantity('${item.item_key}', ${item.quantity - 1})">−</button>
+        <span class="qty-num">${item.quantity}</span>
+        <button class="qty-btn" onclick="updateGroupCartQuantity('${item.item_key}', ${item.quantity + 1})">+</button>
+      </div>
+      <button onclick="removeFromGroupCart('${item.item_key}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:1.1rem">🗑</button>
+      `}
     </div>
   `).join('');
 
+  window.getCartSubtotal = () => total;
+
   if (footer) {
     footer.style.display = '';
+    const subtotalEl = document.getElementById('cart-subtotal');
+    if (subtotalEl) subtotalEl.textContent = `₹${total.toFixed(2)}`;
+    
+    let finalTotal = total;
+    const discountRow = document.getElementById('cart-discount-row');
+    const discountEl = document.getElementById('cart-discount');
+    
+    if (window.appliedCoupon && window.couponDiscountAmount > 0) {
+        if (discountRow) discountRow.style.setProperty('display', 'flex', 'important');
+        if (discountEl) discountEl.textContent = `-₹${window.couponDiscountAmount.toFixed(2)}`;
+        finalTotal = Math.max(0, total - window.couponDiscountAmount);
+    } else {
+        if (discountRow) discountRow.style.setProperty('display', 'none', 'important');
+    }
+    
     const totalEl = document.getElementById('cart-total');
-    if (totalEl) totalEl.textContent = `₹${total}`;
+    if (totalEl) totalEl.textContent = `₹${finalTotal.toFixed(2)}`;
   }
 }
 
 // ── Place Order ─────────────────────────────────────────
 async function placeTableOrder() {
-  if (tableCart.length === 0) {
+  let cartItems = [];
+  if (isGroupOrder && groupCartData) {
+    cartItems = groupCartData.items || [];
+  } else {
+    cartItems = tableCart;
+  }
+
+  if (cartItems.length === 0) {
     showToast('Your order is empty', 'error');
     return;
   }
@@ -245,8 +445,10 @@ async function placeTableOrder() {
   const body = {
     restaurant_id: restaurantId,
     table_number: tableNumber,
-    items: tableCart.map(i => ({ item_id: i.itemId, quantity: i.quantity, options: i.options })),
-    address: `Dine-In — Table ${tableNumber}`
+    items: cartItems.map(i => ({ item_id: i.itemId || i.item_id, quantity: i.quantity, options: i.options || '' })),
+    address: `Dine-In — Table ${tableNumber}`,
+    coupon_code: window.appliedCoupon || '',
+    mobile_number: document.getElementById('cart-mobile')?.value?.trim() || ''
   };
 
   const headers = isGuest ? { 'Content-Type': 'application/json' } : authHeaders();
@@ -267,12 +469,31 @@ async function placeTableOrder() {
   btn.disabled = false;
 
   if (res.order_id) {
+    // Clear carts
     tableCart = [];
+    if (isGroupOrder) {
+      groupCartData = null;
+      isGroupOrder = false;
+      if (groupSyncInterval) {
+        clearInterval(groupSyncInterval);
+        groupSyncInterval = null;
+      }
+      // Reset button
+      const groupBtn = document.getElementById('start-group-order');
+      if (groupBtn) {
+        groupBtn.innerHTML = '👥 Start Group Order';
+        groupBtn.disabled = false;
+        groupBtn.style.background = 'linear-gradient(45deg, #ff6b6b, #ee5a24)';
+      }
+    }
+    
+    window.appliedCoupon = null;
+    window.couponDiscountAmount = 0;
     renderTableCart();
     // Close sidebar
     const sidebar = document.getElementById('cartSidebar');
     if (sidebar) { const bs = bootstrap.Offcanvas.getInstance(sidebar); if (bs) bs.hide(); }
-    showToast('Order placed! 🎉 The kitchen is preparing your food.', 'success');
+    showToast(`Order placed! 🎉 The kitchen is preparing your food.`, 'success');
     
     if (isGuest) {
       let guestOrders = JSON.parse(localStorage.getItem('fc_guest_orders') || '[]');

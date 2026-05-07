@@ -121,10 +121,44 @@ function renderCart() {
 
     list.innerHTML = html;
 
+    window.getCartSubtotal = () => totalPrice;
+
     if (footer) {
         footer.style.display = '';
+        const subtotalEl = document.getElementById('cart-subtotal');
+        if (subtotalEl) subtotalEl.textContent = `₹${totalPrice.toFixed(2)}`;
+        
+        let finalTotal = totalPrice;
+        const discountRow = document.getElementById('cart-discount-row');
+        const discountEl = document.getElementById('cart-discount');
+        
+        if (window.appliedCoupon && window.couponDiscountAmount > 0) {
+            if (discountRow) discountRow.style.setProperty('display', 'flex', 'important');
+            if (discountEl) discountEl.textContent = `-₹${window.couponDiscountAmount.toFixed(2)}`;
+            finalTotal = Math.max(0, finalTotal - window.couponDiscountAmount);
+        } else {
+            if (discountRow) discountRow.style.setProperty('display', 'none', 'important');
+        }
+        
+        // Handle Points logic
+        const usePointsCheckbox = document.getElementById('cart-use-points');
+        const pointsSavingsEl = document.getElementById('cart-points-savings');
+        let pointsDiscount = 0;
+        
+        if (usePointsCheckbox && usePointsCheckbox.checked && window.userFcPoints > 0) {
+            const maxPointsDiscount = window.userFcPoints / 10.0;
+            pointsDiscount = Math.min(finalTotal, maxPointsDiscount);
+            if (pointsSavingsEl) pointsSavingsEl.textContent = `Save ₹${pointsDiscount.toFixed(2)}`;
+            finalTotal = Math.max(0, finalTotal - pointsDiscount);
+        } else {
+            if (pointsSavingsEl && window.userFcPoints > 0) {
+                const potentialSavings = Math.min(finalTotal, window.userFcPoints / 10.0);
+                pointsSavingsEl.textContent = `Save ₹${potentialSavings.toFixed(2)}`;
+            }
+        }
+        
         const totalEl = document.getElementById('cart-total');
-        if (totalEl) totalEl.textContent = `₹${totalPrice}`;
+        if (totalEl) totalEl.textContent = `₹${finalTotal.toFixed(2)}`;
     }
 }
 
@@ -133,6 +167,8 @@ async function checkout(method = 'razorpay') {
     const restIds = Object.keys(cart);
     const addressEl = document.getElementById('cart-address');
     const address = addressEl ? addressEl.value.trim() : '';
+    const usePointsCheckbox = document.getElementById('cart-use-points');
+    const usePoints = usePointsCheckbox ? usePointsCheckbox.checked : false;
 
     if (!getToken() || getRole() !== 'customer') {
         showToast('Please login to place an order', 'error');
@@ -156,7 +192,9 @@ async function checkout(method = 'razorpay') {
             const body = {
                 restaurant_id: restId,
                 items: cart[restId].items.map(i => ({ item_id: i.item_id, quantity: i.quantity, options: i.options })),
-                address
+                address,
+                coupon_code: window.appliedCoupon || '',
+                use_points: usePoints
             };
             const res = await apiPost('/api/order', body, true);
             if (res.order_id) successCount++;
@@ -165,6 +203,8 @@ async function checkout(method = 'razorpay') {
 
         if (successCount > 0) {
             saveCart({});
+            window.appliedCoupon = null;
+            window.couponDiscountAmount = 0;
             renderCart();
             const sidebar = document.getElementById('cartSidebar');
             if (sidebar) { const bs = bootstrap.Offcanvas.getInstance(sidebar); if (bs) bs.hide(); }
@@ -183,6 +223,14 @@ async function checkout(method = 'razorpay') {
     restIds.forEach(rid => {
         cart[rid].items.forEach(i => { totalAmount += i.price * i.quantity; });
     });
+    
+    if (window.appliedCoupon && window.couponDiscountAmount > 0) {
+        totalAmount = Math.max(0, totalAmount - window.couponDiscountAmount);
+    }
+    
+    if (usePoints && window.userFcPoints > 0) {
+        totalAmount = Math.max(0, totalAmount - (window.userFcPoints / 10.0));
+    }
 
     const orderRes = await apiPost('/api/payment/create-order', { amount: totalAmount }, true);
 
@@ -219,7 +267,9 @@ async function checkout(method = 'razorpay') {
                     razorpay_signature:  response.razorpay_signature,
                     restaurant_id: restId,
                     items: cart[restId].items.map(i => ({ item_id: i.item_id, quantity: i.quantity, options: i.options })),
-                    address: address
+                    address: address,
+                    coupon_code: window.appliedCoupon || '',
+                    use_points: usePoints
                 }, true);
                 if (verifyRes.order_id) successCount++;
                 else failCount++;
@@ -227,6 +277,8 @@ async function checkout(method = 'razorpay') {
 
             if (successCount > 0) {
                 saveCart({});
+                window.appliedCoupon = null;
+                window.couponDiscountAmount = 0;
                 renderCart();
                 const sidebar = document.getElementById('cartSidebar');
                 if (sidebar) { const bs = bootstrap.Offcanvas.getInstance(sidebar); if (bs) bs.hide(); }
@@ -267,6 +319,7 @@ async function loadRestaurants(query = '', cuisine = '') {
     if (cuisine) url += `cuisine=${encodeURIComponent(cuisine)}&`;
 
     const data = await apiFetch(url);
+    window.allRestaurants = Array.isArray(data) ? data : [];
     grid.innerHTML = '';
 
     if (!Array.isArray(data) || data.length === 0) {

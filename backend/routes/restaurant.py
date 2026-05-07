@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import get_jwt_identity
 from bson import ObjectId
 from datetime import datetime, timedelta
-from backend.db import menu_col, orders_col, restaurants_col, reviews_col, tables_col
+from backend.db import menu_col, orders_col, restaurants_col, reviews_col, tables_col, coupons_col
 from backend.utils.auth_helper import role_required
 from backend.utils.upload import save_image
 
@@ -92,6 +92,51 @@ def revenue_data():
     data = [round(daily_revenue[k], 2) for k in labels]
     
     return jsonify({"labels": labels, "data": data}), 200
+
+
+# ── Top 10 Sold Dishes Analytics ───────────────────────────────────────────────
+@restaurant_bp.route("/api/restaurant/top_dishes", methods=["GET"])
+@role_required("restaurant")
+def top_sold_dishes():
+    rest_id = ObjectId(get_jwt_identity())
+    
+    # Get all delivered/accepted orders for this restaurant
+    orders = list(orders_col.find({
+        "restaurant_id": rest_id,
+        "status": {"$in": ["accepted", "preparing", "ready", "delivered"]}
+    }))
+    
+    # Aggregate dish sales
+    dish_stats = {}
+    for order in orders:
+        for item in order.get("items", []):
+            item_id = str(item.get("item_id", ""))
+            qty = item.get("quantity", 0)
+            price = item.get("price", 0)
+            
+            if item_id not in dish_stats:
+                dish_stats[item_id] = {
+                    "name": item.get("name", "Unknown"),
+                    "quantity": 0,
+                    "revenue": 0
+                }
+            
+            dish_stats[item_id]["quantity"] += qty
+            dish_stats[item_id]["revenue"] += qty * price
+    
+    # Sort by quantity (descending) and get top 10
+    sorted_dishes = sorted(dish_stats.items(), key=lambda x: x[1]["quantity"], reverse=True)[:10]
+    
+    result = []
+    for item_id, stats in sorted_dishes:
+        result.append({
+            "item_id": item_id,
+            "name": stats["name"],
+            "quantity_sold": stats["quantity"],
+            "revenue": round(stats["revenue"], 2)
+        })
+    
+    return jsonify(result), 200
 
 
 # ── Get Own Menu ────────────────────────────────────────────────────────────────
@@ -248,9 +293,144 @@ def update_offer():
     rest_id = ObjectId(get_jwt_identity())
     data = request.get_json() or {}
     offer_text = data.get("offer", "").strip()
+    discount_pct = data.get("discount_pct", 0)
+    allow_coupons = data.get("allow_coupons", True)  # Default to true for backward compatibility
 
-    restaurants_col.update_one({"_id": rest_id}, {"$set": {"offer": offer_text}})
+    restaurants_col.update_one({"_id": rest_id}, {"$set": {
+        "offer": offer_text,
+        "discount_pct": float(discount_pct),
+        "allow_coupons": allow_coupons
+    }})
     return jsonify({"message": "Offer updated successfully"}), 200
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# COUPON MANAGEMENT
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Get All Coupons for Restaurant ──────────────────────────────────────────────
+@restaurant_bp.route("/api/restaurant/coupons", methods=["GET"])
+@role_required("restaurant")
+def get_restaurant_coupons():
+    rest_id = ObjectId(get_jwt_identity())
+    coupons = list(coupons_col.find({"restaurant_id": rest_id}).sort("created_at", -1))
+    
+    result = []
+    for c in coupons:
+        c["_id"] = str(c["_id"])
+        c["restaurant_id"] = str(c["restaurant_id"])
+        result.append(c)
+    
+    return jsonify(result), 200
+
+
+# ── Create New Coupon ───────────────────────────────────────────────────────────
+@restaurant_bp.route("/api/restaurant/coupon", methods=["POST"])
+@role_required("restaurant")
+def create_coupon():
+    rest_id = ObjectId(get_jwt_identity())
+    data = request.get_json() or {}
+    
+    code = data.get("code", "").upper().strip()
+    coupon_type = data.get("type", "percent")  # percent or flat
+    value = float(data.get("value", 0))
+    max_discount = float(data.get("max_discount", 999999))
+    min_order = float(data.get("min_order", 0))
+    first_order_only = bool(data.get("first_order_only", False))
+    enabled = bool(data.get("enabled", True))
+    
+    if not code or value <= 0:
+        return jsonify({"error": "Code and value are required and must be positive"}), 400
+    
+    if coupon_type not in ["percent", "flat"]:
+        return jsonify({"error": "Type must be 'percent' or 'flat'"}), 400
+    
+    # Check if coupon already exists
+    existing = coupons_col.find_one({
+        "restaurant_id": rest_id,
+        "code": code
+    })
+    
+    if existing:
+        return jsonify({"error": "Coupon with this code already exists"}), 409
+    
+    coupon_doc = {
+        "restaurant_id": rest_id,
+        "code": code,
+        "type": coupon_type,
+        "value": value,
+        "max_discount": max_discount,
+        "min_order": min_order,
+        "first_order_only": first_order_only,
+        "enabled": enabled,
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow()
+    }
+    
+    result = coupons_col.insert_one(coupon_doc)
+    coupon_doc["_id"] = str(result.inserted_id)
+    coupon_doc["restaurant_id"] = str(coupon_doc["restaurant_id"])
+    
+    return jsonify({"message": "Coupon created successfully", "coupon": coupon_doc}), 201
+
+
+# ── Update Coupon ───────────────────────────────────────────────────────────────
+@restaurant_bp.route("/api/restaurant/coupon/<coupon_id>", methods=["PUT"])
+@role_required("restaurant")
+def update_coupon(coupon_id):
+    rest_id = ObjectId(get_jwt_identity())
+    
+    try:
+        cid = ObjectId(coupon_id)
+    except Exception:
+        return jsonify({"error": "Invalid coupon id"}), 400
+    
+    data = request.get_json() or {}
+    
+    coupon = coupons_col.find_one({"_id": cid, "restaurant_id": rest_id})
+    if not coupon:
+        return jsonify({"error": "Coupon not found or unauthorized"}), 404
+    
+    updates = {}
+    if "code" in data:
+        updates["code"] = data["code"].upper().strip()
+    if "value" in data:
+        updates["value"] = float(data["value"])
+    if "max_discount" in data:
+        updates["max_discount"] = float(data["max_discount"])
+    if "min_order" in data:
+        updates["min_order"] = float(data["min_order"])
+    if "first_order_only" in data:
+        updates["first_order_only"] = bool(data["first_order_only"])
+    if "enabled" in data:
+        updates["enabled"] = bool(data["enabled"])
+    
+    if not updates:
+        return jsonify({"error": "No fields to update"}), 400
+    
+    updates["updated_at"] = datetime.utcnow()
+    
+    coupons_col.update_one({"_id": cid}, {"$set": updates})
+    return jsonify({"message": "Coupon updated successfully"}), 200
+
+
+# ── Delete Coupon ───────────────────────────────────────────────────────────────
+@restaurant_bp.route("/api/restaurant/coupon/<coupon_id>", methods=["DELETE"])
+@role_required("restaurant")
+def delete_coupon(coupon_id):
+    rest_id = ObjectId(get_jwt_identity())
+    
+    try:
+        cid = ObjectId(coupon_id)
+    except Exception:
+        return jsonify({"error": "Invalid coupon id"}), 400
+    
+    result = coupons_col.delete_one({"_id": cid, "restaurant_id": rest_id})
+    
+    if result.deleted_count == 0:
+        return jsonify({"error": "Coupon not found or unauthorized"}), 404
+    
+    return jsonify({"message": "Coupon deleted successfully"}), 200
 
 
 # ══════════════════════════════════════════════════════════════════════════════

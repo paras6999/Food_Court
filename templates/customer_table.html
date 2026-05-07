@@ -98,11 +98,34 @@
                 <div class="d-flex gap-2 mb-4">
                     <button class="pill" id="filter-veg" onclick="toggleTableMenuFilter('veg')">🟢 Veg Only</button>
                     <button class="pill" id="filter-best" onclick="toggleTableMenuFilter('best')">🔥 Bestsellers</button>
+                    <button class="pill" id="start-group-order" onclick="startGroupOrder()" style="display:none; background: linear-gradient(45deg, #ff6b6b, #ee5a24); color: white;">👥 Start Group Order</button>
                 </div>
 
                 <div class="row g-3" id="menu-grid">
-                    <div class="col-12 text-center py-4" style="color:var(--text-muted)">
-                        <div class="spinner-border text-warning"></div>
+                    <!-- Skeletons -->
+                    <div class="col-12 col-md-6 col-lg-4">
+                        <div class="fc-card" style="padding:1rem">
+                            <div class="d-flex gap-3">
+                                <div class="skeleton" style="width:100px; height:100px; border-radius:12px"></div>
+                                <div style="flex:1">
+                                    <div class="skeleton" style="height:1.2rem;width:80%;margin-bottom:.5rem"></div>
+                                    <div class="skeleton" style="height:.9rem;width:40%;margin-bottom:1rem"></div>
+                                    <div class="skeleton" style="height:2rem;width:60%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6 col-lg-4">
+                        <div class="fc-card" style="padding:1rem">
+                            <div class="d-flex gap-3">
+                                <div class="skeleton" style="width:100px; height:100px; border-radius:12px"></div>
+                                <div style="flex:1">
+                                    <div class="skeleton" style="height:1.2rem;width:80%;margin-bottom:.5rem"></div>
+                                    <div class="skeleton" style="height:.9rem;width:40%;margin-bottom:1rem"></div>
+                                    <div class="skeleton" style="height:2rem;width:60%"></div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -165,14 +188,48 @@
             <div id="cart-items-list" class="flex-grow-1"></div>
             <div id="cart-footer"
                 style="display:none; border-top:1px solid var(--border); padding-top:1rem; margin-top:1rem;">
+                <div class="mb-3">
+                    <label class="fc-label">Coupon Code</label>
+                    <div class="d-flex gap-2">
+                        <input type="text" class="fc-input" id="cart-coupon" placeholder="Enter coupon..." style="flex:1; text-transform:uppercase;">
+                        <button class="btn btn-outline-custom" onclick="applyCoupon(restaurantId)" style="padding: 0 1rem; border-color:var(--border); color:var(--text);">Apply</button>
+                    </div>
+                    <div id="coupon-message" style="font-size: 0.85rem; margin-top: 0.25rem;"></div>
+                </div>
+                <div class="mb-3" id="cart-points-container" style="display:none;">
+                    <div class="form-check d-flex align-items-center gap-2" style="background:rgba(255,107,53,0.1); padding:0.5rem 1rem; border-radius:8px; border:1px solid rgba(255,107,53,0.2);">
+                        <input class="form-check-input" type="checkbox" id="cart-use-points" onchange="renderTableCart()" style="margin-top:0;">
+                        <label class="form-check-label mb-0 w-100 d-flex justify-content-between align-items-center" for="cart-use-points" style="color:var(--text-primary); cursor:pointer;">
+                            <span id="cart-points-label"><i class="bi bi-star-fill text-warning"></i> Use 0 Points</span>
+                            <strong class="text-success" id="cart-points-savings">Save ₹0</strong>
+                        </label>
+                    </div>
+                </div>
                 <div class="d-flex justify-content-between mb-2">
                     <span style="color:var(--text-muted)">Subtotal</span>
-                    <strong id="cart-total">₹0</strong>
+                    <strong id="cart-subtotal">₹0</strong>
+                </div>
+                <div class="d-flex justify-content-between mb-2 text-success" id="cart-discount-row" style="display:none !important;">
+                    <span>Discount</span>
+                    <strong id="cart-discount">-₹0</strong>
+                </div>
+                <div class="d-flex justify-content-between mb-3 border-top pt-2" style="border-color:var(--border) !important;">
+                    <span style="font-weight:bold;">Total</span>
+                    <strong id="cart-total" style="font-size:1.1rem; color:var(--primary);">₹0</strong>
                 </div>
                 <div class="mb-3">
                     <label class="fc-label">Special Instructions (optional)</label>
                     <textarea class="fc-input" id="cart-notes" rows="2"
                         placeholder="Any special requests for the kitchen…"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="fc-label">Mobile Number (for WhatsApp bill - optional)</label>
+                    <input type="tel" class="fc-input" id="cart-mobile" 
+                        placeholder="10-digit mobile number or +91XXXXXXXXXX" 
+                        pattern="[0-9+\-]{10,15}">
+                    <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">
+                        Your bill will be sent to this number via WhatsApp after order delivery
+                    </div>
                 </div>
                 <button class="btn-primary-custom w-100 justify-content-center" id="checkout-btn"
                     onclick="placeTableOrder()">

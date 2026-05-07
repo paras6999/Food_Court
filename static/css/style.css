@@ -23,6 +23,18 @@
     --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+body.light-theme {
+    --secondary: #f4f6f8;
+    --surface: #ffffff;
+    --surface2: #f1f3f5;
+    --text-primary: #1e293b;
+    --text-muted: #64748b;
+    --border: rgba(0, 0, 0, 0.08);
+    --card-bg: rgba(255, 255, 255, 0.95);
+    --shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
+    --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.04);
+}
+
 *,
 *::before,
 *::after {
@@ -469,7 +481,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+    background: linear-gradient(135deg, var(--secondary), var(--surface), var(--surface2));
 }
 
 /* ── Dashboard Stats ─────────────────────────────────────────────── */
@@ -966,7 +978,7 @@ footer {
 
 /* ── Table Order Header ─────────────────────────────────────────── */
 .table-order-header {
-    background: linear-gradient(135deg, #1a1a2e, #16213e);
+    background: linear-gradient(135deg, var(--secondary), var(--surface));
     padding: 2rem 0;
     border-bottom: 1px solid var(--border);
 }

@@ -2,8 +2,8 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import get_jwt_identity, get_jwt, jwt_required
 from bson import ObjectId
 from datetime import datetime
-import hmac, hashlib, razorpay
-from backend.db import restaurants_col, menu_col, orders_col, reviews_col, tables_col
+import hmac, hashlib, razorpay, requests, os, re
+from backend.db import restaurants_col, menu_col, orders_col, reviews_col, tables_col, group_carts_col, coupons_col, users_col
 from backend.utils.auth_helper import role_required
 from backend.config import Config
 
@@ -66,6 +66,20 @@ def get_menu(restaurant_id):
     return jsonify([_item_to_dict(i) for i in items]), 200
 
 
+# ── Public: Get Tables for Floor Plan ───────────────────────────────────────────
+@customer_bp.route("/api/restaurant/<restaurant_id>/tables", methods=["GET"])
+def get_restaurant_tables(restaurant_id):
+    try:
+        rid = ObjectId(restaurant_id)
+    except Exception:
+        return jsonify({"error": "Invalid restaurant id"}), 400
+        
+    tables = list(tables_col.find({"restaurant_id": rid}))
+    for t in tables:
+        t["_id"] = str(t["_id"])
+        t["restaurant_id"] = str(t["restaurant_id"])
+    return jsonify(tables), 200
+
 # ── Validate Table (QR Code Landing) ───────────────────────────────────────────
 @customer_bp.route("/api/table/<restaurant_id>/<int:table_number>", methods=["GET"])
 def validate_table(restaurant_id, table_number):
@@ -97,7 +111,22 @@ def validate_table(restaurant_id, table_number):
     }), 200
 
 
-from flask_jwt_extended import jwt_required, get_jwt
+# ── User Profile & Loyalty ──────────────────────────────────────────────────────
+@customer_bp.route("/api/user/profile", methods=["GET"])
+@role_required("customer")
+def get_user_profile():
+    user_id = get_jwt_identity()
+    from backend.db import users_col
+    user = users_col.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+        
+    return jsonify({
+        "name": user.get("name", ""),
+        "email": user.get("email", ""),
+        "fc_points": user.get("fc_points", 0)
+    }), 200
+
 
 # ── Place Order ─────────────────────────────────────────────────────────────────
 @customer_bp.route("/api/order", methods=["POST"])
@@ -114,6 +143,7 @@ def place_order():
     items = data.get("items", [])
     address = data.get("address", "")
     table_number = data.get("table_number")  # Optional: for dine-in orders
+    mobile_number = data.get("mobile_number", "").strip()  # For WhatsApp bill
 
     # If it's a delivery order and no user_id, fail
     if table_number is None and not user_id:
@@ -154,15 +184,80 @@ def place_order():
             "price": price
         })
 
+    # Apply restaurant discount if the user is logged in
+    rest = restaurants_col.find_one({"_id": rid})
+    if user_id and rest and rest.get("discount_pct"):
+        r_discount = float(rest.get("discount_pct", 0))
+        total = total * (1 - (r_discount / 100))
+
+    # Apply per-restaurant coupon discount
+    coupon_code = data.get("coupon_code", "").upper().strip()
+    coupon_discount = 0
+    if coupon_code:
+        coupon_doc = coupons_col.find_one({
+            "restaurant_id": rid,
+            "code": coupon_code,
+            "enabled": True
+        })
+        
+        if coupon_doc:
+            valid = True
+            if coupon_doc.get("min_order", 0) > total: 
+                valid = False
+            if coupon_doc.get("first_order_only") and user_id:
+                if orders_col.count_documents({"user_id": ObjectId(user_id)}) > 0: 
+                    valid = False
+            
+            if valid:
+                if coupon_doc["type"] == "percent":
+                    coupon_discount = (coupon_doc["value"] / 100.0) * total
+                    if coupon_discount > coupon_doc.get("max_discount", 999999):
+                        coupon_discount = coupon_doc.get("max_discount", 999999)
+                elif coupon_doc["type"] == "flat":
+                    coupon_discount = coupon_doc["value"]
+                if coupon_discount > total: 
+                    coupon_discount = total
+                total -= coupon_discount
+    
+    # Loyalty Points Usage
+    points_used = 0
+    points_discount = 0
+    earned_points = 0
+    if user_id:
+        user = users_col.find_one({"_id": ObjectId(user_id)})
+        if user and data.get("use_points") and user.get("fc_points", 0) > 0:
+            user_points = user["fc_points"]
+            max_discount = user_points / 10.0 # 10 points = 1 INR
+            if max_discount > total:
+                points_discount = total
+                points_used = int(total * 10)
+            else:
+                points_discount = max_discount
+                points_used = user_points
+            total -= points_discount
+            users_col.update_one({"_id": ObjectId(user_id)}, {"$inc": {"fc_points": -points_used}})
+            
+        # Earn points on final total
+        earned_points = int(total // 10)
+        if earned_points > 0:
+            users_col.update_one({"_id": ObjectId(user_id)}, {"$inc": {"fc_points": earned_points}})
+
     order_doc = {
         "user_id": ObjectId(user_id) if user_id else "guest",
         "restaurant_id": rid,
         "items": enriched,
-        "total_price": total,
+        "total_price": round(total, 2),
+        "points_used": points_used,
+        "points_discount": points_discount,
+        "earned_points": earned_points,
         "address": address,
         "status": "pending",
         "created_at": datetime.utcnow()
     }
+
+    # Add mobile number if provided for WhatsApp bill
+    if mobile_number:
+        order_doc["customer_mobile"] = mobile_number
 
     # Add table_number and order_type for dine-in
     if table_number is not None:
@@ -175,6 +270,225 @@ def place_order():
 
     return jsonify({"message": "Order placed successfully", "order_id": str(order_id)}), 201
 
+# ── Group Cart Endpoints ──────────────────────────────────
+@customer_bp.route("/api/cart/group/join", methods=["POST"])
+@role_required("customer")
+def join_group_cart():
+    data = request.get_json()
+    restaurant_id = data.get("restaurant_id")
+    table_number = data.get("table_number")
+
+    if not restaurant_id or table_number is None:
+        return jsonify({"error": "restaurant_id and table_number required"}), 400
+
+    try:
+        rid = ObjectId(restaurant_id)
+    except Exception:
+        return jsonify({"error": "Invalid restaurant id"}), 400
+
+    table_number = int(table_number)
+
+    # Check if table exists
+    table = tables_col.find_one({"restaurant_id": rid, "table_number": table_number})
+    if not table:
+        return jsonify({"error": f"Table {table_number} not found"}), 404
+
+    user_id = get_jwt_identity()
+    user_name = get_jwt().get("name", "Customer")
+
+    # Find or create group cart
+    group_cart = group_carts_col.find_one({"restaurant_id": rid, "table_number": table_number})
+    if not group_cart:
+        group_cart = {
+            "restaurant_id": rid,
+            "table_number": table_number,
+            "participants": [],
+            "items": [],
+            "created_at": datetime.utcnow()
+        }
+
+    # Add user if not already participating
+    if not any(p["user_id"] == user_id for p in group_cart.get("participants", [])):
+        group_cart["participants"].append({
+            "user_id": user_id,
+            "user_name": user_name,
+            "joined_at": datetime.utcnow()
+        })
+        group_carts_col.replace_one(
+            {"restaurant_id": rid, "table_number": table_number},
+            group_cart,
+            upsert=True
+        )
+
+    return jsonify({"message": "Joined group cart", "cart": _group_cart_to_dict(group_cart)}), 200
+
+@customer_bp.route("/api/cart/group/add", methods=["POST"])
+@role_required("customer")
+def add_to_group_cart():
+    data = request.get_json()
+    restaurant_id = data.get("restaurant_id")
+    table_number = data.get("table_number")
+    item_id = data.get("item_id")
+    quantity = data.get("quantity", 1)
+    options = data.get("options", "")
+
+    if not restaurant_id or table_number is None or not item_id:
+        return jsonify({"error": "restaurant_id, table_number, and item_id required"}), 400
+
+    try:
+        rid = ObjectId(restaurant_id)
+        iid = ObjectId(item_id)
+    except Exception:
+        return jsonify({"error": "Invalid id format"}), 400
+
+    table_number = int(table_number)
+    quantity = int(quantity)
+
+    # Check if user is in group cart
+    user_id = get_jwt_identity()
+    user_name = get_jwt().get("name", "Customer")
+
+    group_cart = group_carts_col.find_one({"restaurant_id": rid, "table_number": table_number})
+    if not group_cart or not any(p["user_id"] == user_id for p in group_cart.get("participants", [])):
+        return jsonify({"error": "Not part of this group cart"}), 403
+
+    # Get menu item
+    menu_item = menu_col.find_one({"_id": iid})
+    if not menu_item:
+        return jsonify({"error": "Menu item not found"}), 404
+
+    # Add item with user attribution
+    item_key = f"{item_id}_{options}"
+    existing_item = next((i for i in group_cart.get("items", []) if i["item_key"] == item_key), None)
+
+    if existing_item:
+        existing_item["quantity"] += quantity
+    else:
+        group_cart["items"].append({
+            "item_key": item_key,
+            "item_id": iid,
+            "name": menu_item["name"],
+            "price": menu_item["price"],
+            "quantity": quantity,
+            "options": options,
+            "added_by": user_name,
+            "added_by_id": user_id
+        })
+
+    group_carts_col.replace_one(
+        {"restaurant_id": rid, "table_number": table_number},
+        group_cart
+    )
+
+    return jsonify({"message": "Item added to group cart", "cart": _group_cart_to_dict(group_cart)}), 200
+
+@customer_bp.route("/api/cart/group/remove", methods=["POST"])
+@role_required("customer")
+def remove_from_group_cart():
+    data = request.get_json()
+    restaurant_id = data.get("restaurant_id")
+    table_number = data.get("table_number")
+    item_key = data.get("item_key")
+
+    if not restaurant_id or table_number is None or not item_key:
+        return jsonify({"error": "restaurant_id, table_number, and item_key required"}), 400
+
+    try:
+        rid = ObjectId(restaurant_id)
+    except Exception:
+        return jsonify({"error": "Invalid restaurant id"}), 400
+
+    table_number = int(table_number)
+    user_id = get_jwt_identity()
+
+    group_cart = group_carts_col.find_one({"restaurant_id": rid, "table_number": table_number})
+    if not group_cart or not any(p["user_id"] == user_id for p in group_cart.get("participants", [])):
+        return jsonify({"error": "Not part of this group cart"}), 403
+
+    # Remove the item
+    group_cart["items"] = [i for i in group_cart.get("items", []) if i["item_key"] != item_key]
+
+    group_carts_col.replace_one(
+        {"restaurant_id": rid, "table_number": table_number},
+        group_cart
+    )
+
+    return jsonify({"message": "Item removed from group cart", "cart": _group_cart_to_dict(group_cart)}), 200
+
+@customer_bp.route("/api/cart/group/update-quantity", methods=["POST"])
+@role_required("customer")
+def update_group_cart_quantity():
+    data = request.get_json()
+    restaurant_id = data.get("restaurant_id")
+    table_number = data.get("table_number")
+    item_key = data.get("item_key")
+    quantity = data.get("quantity", 1)
+
+    if not restaurant_id or table_number is None or not item_key:
+        return jsonify({"error": "restaurant_id, table_number, and item_key required"}), 400
+
+    try:
+        rid = ObjectId(restaurant_id)
+    except Exception:
+        return jsonify({"error": "Invalid restaurant id"}), 400
+
+    table_number = int(table_number)
+    quantity = int(quantity)
+    user_id = get_jwt_identity()
+
+    group_cart = group_carts_col.find_one({"restaurant_id": rid, "table_number": table_number})
+    if not group_cart or not any(p["user_id"] == user_id for p in group_cart.get("participants", [])):
+        return jsonify({"error": "Not part of this group cart"}), 403
+
+    # Find and update the item
+    for item in group_cart.get("items", []):
+        if item["item_key"] == item_key:
+            if quantity <= 0:
+                group_cart["items"].remove(item)
+            else:
+                item["quantity"] = quantity
+            break
+
+    group_carts_col.replace_one(
+        {"restaurant_id": rid, "table_number": table_number},
+        group_cart
+    )
+
+    return jsonify({"message": "Quantity updated", "cart": _group_cart_to_dict(group_cart)}), 200
+
+@customer_bp.route("/api/cart/group/sync", methods=["GET"])
+@role_required("customer")
+def sync_group_cart():
+    """Sync group cart for real-time updates"""
+    restaurant_id = request.args.get("restaurant_id")
+    table_number = request.args.get("table_number")
+    
+    if not restaurant_id or table_number is None:
+        return jsonify({"error": "restaurant_id and table_number required"}), 400
+    
+    try:
+        rid = ObjectId(restaurant_id)
+    except Exception:
+        return jsonify({"error": "Invalid restaurant id"}), 400
+    
+    table_number = int(table_number)
+    user_id = get_jwt_identity()
+    
+    group_cart = group_carts_col.find_one({"restaurant_id": rid, "table_number": table_number})
+    if not group_cart or not any(p["user_id"] == user_id for p in group_cart.get("participants", [])):
+        return jsonify({"error": "Not part of this group cart"}), 403
+    
+    return jsonify({"cart": _group_cart_to_dict(group_cart)}), 200
+
+def _group_cart_to_dict(gc):
+    gc["_id"] = str(gc["_id"])
+    gc["restaurant_id"] = str(gc["restaurant_id"])
+    for item in gc.get("items", []):
+        item["item_id"] = str(item["item_id"])
+        item["added_by_id"] = str(item["added_by_id"])
+    for p in gc.get("participants", []):
+        p["user_id"] = str(p["user_id"])
+    return gc
 
 # ── Service Request (Call Waiter) ──────────────────────────────────────────────
 @customer_bp.route("/api/service-request", methods=["POST"])
@@ -429,6 +743,79 @@ def get_order_by_id(order_id):
     return jsonify(order_dict), 200
 
 
+# ── Coupon Validation ───────────────────────────────────────────────────────────
+COUPONS = {
+    "WELCOME50": {"type": "percent", "value": 50, "max_discount": 100, "min_order": 0, "first_order_only": True},
+    "FIRSTORDER": {"type": "flat", "value": 100, "max_discount": 100, "min_order": 200, "first_order_only": True},
+    "FESTIVE20": {"type": "percent", "value": 20, "max_discount": 150, "min_order": 0, "first_order_only": False},
+    "NIGHTOWL": {"type": "percent", "value": 15, "max_discount": 100, "min_order": 0, "first_order_only": False},
+    "FREEDELIVERY": {"type": "flat", "value": 50, "max_discount": 50, "min_order": 150, "first_order_only": False},
+    "WEEKENDVIBES": {"type": "flat", "value": 75, "max_discount": 75, "min_order": 300, "first_order_only": False}
+}
+
+@customer_bp.route("/api/coupon/validate", methods=["POST"])
+@jwt_required(optional=True)
+def validate_coupon():
+    data = request.get_json() or {}
+    code = str(data.get("code", "")).upper().strip()
+    subtotal = float(data.get("subtotal", 0))
+    restaurant_id = data.get("restaurant_id")
+    user_id = get_jwt_identity()
+
+    if not code:
+        return jsonify({"valid": False, "message": "Coupon code is empty"}), 400
+
+    if not restaurant_id:
+        return jsonify({"valid": False, "message": "Restaurant ID is required"}), 400
+
+    try:
+        rid = ObjectId(restaurant_id)
+    except Exception:
+        return jsonify({"valid": False, "message": "Invalid restaurant ID"}), 400
+
+    # Check per-restaurant coupon first
+    coupon_doc = coupons_col.find_one({
+        "restaurant_id": rid,
+        "code": code,
+        "enabled": True
+    })
+
+    if not coupon_doc:
+        return jsonify({"valid": False, "message": "Invalid coupon code for this restaurant"}), 400
+
+    if coupon_doc.get("min_order", 0) > subtotal:
+        return jsonify({"valid": False, "message": f"Minimum order of ₹{coupon_doc.get('min_order', 0)} required"}), 400
+
+    if coupon_doc.get("first_order_only"):
+        if not user_id:
+            return jsonify({"valid": False, "message": "You must be logged in to use this coupon"}), 401
+        
+        # Check if user has previous orders
+        previous_orders = orders_col.count_documents({"user_id": ObjectId(user_id)})
+        if previous_orders > 0:
+            return jsonify({"valid": False, "message": "This coupon is only valid for your first order"}), 400
+
+    # Calculate discount
+    discount = 0
+    if coupon_doc["type"] == "percent":
+        discount = (coupon_doc["value"] / 100.0) * subtotal
+        if discount > coupon_doc.get("max_discount", 999999):
+            discount = coupon_doc.get("max_discount", 999999)
+    elif coupon_doc["type"] == "flat":
+        discount = coupon_doc["value"]
+
+    # Don't let discount exceed subtotal
+    if discount > subtotal:
+        discount = subtotal
+
+    return jsonify({
+        "valid": True,
+        "code": code,
+        "discount_amount": round(discount, 2),
+        "message": f"Coupon '{code}' applied successfully!"
+    }), 200
+
+
 # ── Razorpay: Create Payment Order ──────────────────────────────────────────────
 @customer_bp.route("/api/payment/create-order", methods=["POST"])
 @role_required("customer")
@@ -468,6 +855,7 @@ def verify_payment_and_place_order():
     razorpay_order_id   = data.get("razorpay_order_id", "")
     razorpay_payment_id = data.get("razorpay_payment_id", "")
     razorpay_signature  = data.get("razorpay_signature", "")
+    mobile_number = data.get("mobile_number", "").strip()  # For WhatsApp bill
 
     # Verify HMAC-SHA256 signature
     msg = f"{razorpay_order_id}|{razorpay_payment_id}".encode()
@@ -517,11 +905,72 @@ def verify_payment_and_place_order():
             "price": price
         })
 
+    # Apply restaurant discount if the user is logged in
+    rest = restaurants_col.find_one({"_id": rid})
+    if user_id and rest and rest.get("discount_pct"):
+        r_discount = float(rest.get("discount_pct", 0))
+        total = total * (1 - (r_discount / 100))
+
+    # Apply per-restaurant coupon discount
+    coupon_code = data.get("coupon_code", "").upper().strip()
+    coupon_discount = 0
+    if coupon_code:
+        coupon_doc = coupons_col.find_one({
+            "restaurant_id": rid,
+            "code": coupon_code,
+            "enabled": True
+        })
+        
+        if coupon_doc:
+            valid = True
+            if coupon_doc.get("min_order", 0) > total: 
+                valid = False
+            if coupon_doc.get("first_order_only") and user_id:
+                if orders_col.count_documents({"user_id": ObjectId(user_id)}) > 0: 
+                    valid = False
+            
+            if valid:
+                if coupon_doc["type"] == "percent":
+                    coupon_discount = (coupon_doc["value"] / 100.0) * total
+                    if coupon_discount > coupon_doc.get("max_discount", 999999):
+                        coupon_discount = coupon_doc.get("max_discount", 999999)
+                elif coupon_doc["type"] == "flat":
+                    coupon_discount = coupon_doc["value"]
+                if coupon_discount > total: 
+                    coupon_discount = total
+                total -= coupon_discount
+
+    # Loyalty Points Usage
+    points_used = 0
+    points_discount = 0
+    earned_points = 0
+    if user_id:
+        user = users_col.find_one({"_id": ObjectId(user_id)})
+        if user and data.get("use_points") and user.get("fc_points", 0) > 0:
+            user_points = user["fc_points"]
+            max_discount = user_points / 10.0 # 10 points = 1 INR
+            if max_discount > total:
+                points_discount = total
+                points_used = int(total * 10)
+            else:
+                points_discount = max_discount
+                points_used = user_points
+            total -= points_discount
+            users_col.update_one({"_id": ObjectId(user_id)}, {"$inc": {"fc_points": -points_used}})
+            
+        # Earn points on final total
+        earned_points = int(total // 10)
+        if earned_points > 0:
+            users_col.update_one({"_id": ObjectId(user_id)}, {"$inc": {"fc_points": earned_points}})
+
     order_doc = {
         "user_id": ObjectId(user_id),
         "restaurant_id": rid,
         "items": enriched,
-        "total_price": total,
+        "total_price": round(total, 2),
+        "points_used": points_used,
+        "points_discount": points_discount,
+        "earned_points": earned_points,
         "address": address,
         "status": "pending",
         "created_at": datetime.utcnow(),
@@ -532,6 +981,10 @@ def verify_payment_and_place_order():
         }
     }
 
+    # Add mobile number if provided for WhatsApp bill
+    if mobile_number:
+        order_doc["customer_mobile"] = mobile_number
+
     if table_number is not None:
         order_doc["table_number"] = table_number
         order_doc["order_type"] = "dine-in"
@@ -540,3 +993,90 @@ def verify_payment_and_place_order():
 
     order_id = orders_col.insert_one(order_doc).inserted_id
     return jsonify({"message": "Payment verified & order placed!", "order_id": str(order_id)}), 201
+
+
+# ── Send Bill via WhatsApp ──────────────────────────────────────────────────────
+@customer_bp.route("/api/order/<order_id>/send-whatsapp-bill", methods=["POST"])
+@jwt_required(optional=True)
+def send_whatsapp_bill(order_id):
+    """Send bill to customer via WhatsApp"""
+    try:
+        oid = ObjectId(order_id)
+    except Exception:
+        return jsonify({"error": "Invalid order id"}), 400
+    
+    order = orders_col.find_one({"_id": oid})
+    if not order:
+        return jsonify({"error": "Order not found"}), 404
+    
+    mobile = order.get("customer_mobile", "").strip()
+    if not mobile:
+        return jsonify({"error": "No mobile number found for this order"}), 400
+    
+    # Validate mobile number format (10 digits or international format)
+    mobile = re.sub(r"\D", "", mobile)  # Remove non-digits
+    if len(mobile) < 10:
+        return jsonify({"error": "Invalid mobile number"}), 400
+    
+    # Ensure Indian format: add +91 if needed
+    if not mobile.startswith("91") and len(mobile) == 10:
+        mobile = "91" + mobile
+    elif len(mobile) == 12 and mobile.startswith("91"):
+        pass  # Already in correct format
+    else:
+        return jsonify({"error": "Invalid mobile number format"}), 400
+    
+    mobile_with_code = "+" + mobile
+    
+    # Build bill message
+    rest = restaurants_col.find_one({"_id": order.get("restaurant_id")})
+    rest_name = rest.get("name", "Restaurant") if rest else "Restaurant"
+    
+    bill_text = f"""🧾 *FoodCourt Order Receipt*
+
+Restaurant: {rest_name}
+Order ID: {order_id}
+
+*Items:*
+"""
+    
+    for item in order.get("items", []):
+        bill_text += f"• {item.get('name', 'Item')} x{item.get('quantity', 0)} = ₹{item.get('price', 0) * item.get('quantity', 0)}\n"
+    
+    bill_text += f"""
+*Subtotal:* ₹{order.get('total_price', 0) + order.get('points_discount', 0) + order.get('coupon_discount', 0)}
+*Discount:* -₹{order.get('points_discount', 0) + order.get('coupon_discount', 0)}
+*Total:* ₹{order.get('total_price', 0)}
+
+Status: {order.get('status', 'Pending').upper()}
+Thank you for ordering! 🙏"""
+    
+    # Try to send via WhatsApp Business API (if configured)
+    whatsapp_token = os.getenv("WHATSAPP_API_TOKEN", "")
+    whatsapp_phone_id = os.getenv("WHATSAPP_PHONE_ID", "")
+    
+    if whatsapp_token and whatsapp_phone_id:
+        try:
+            url = f"https://graph.instagram.com/v18.0/{whatsapp_phone_id}/messages"
+            headers = {
+                "Authorization": f"Bearer {whatsapp_token}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": mobile_with_code,
+                "type": "text",
+                "text": {"body": bill_text}
+            }
+            response = requests.post(url, json=payload, headers=headers, timeout=10)
+            if response.status_code in [200, 201]:
+                return jsonify({"message": f"Bill sent to {mobile_with_code} via WhatsApp"}), 200
+        except Exception as e:
+            # Log error but don't fail - WhatsApp is optional
+            print(f"WhatsApp API error: {str(e)}")
+    
+    # Fallback message if WhatsApp not configured
+    return jsonify({
+        "message": "WhatsApp integration not configured. Bill details available in app.",
+        "bill_preview": bill_text
+    }), 200
