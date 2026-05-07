@@ -789,6 +789,8 @@ def get_reviews(restaurant_id):
             rv["_id"] = str(rv["_id"])
             rv["user_id"] = str(rv.get("user_id", ""))
             rv["restaurant_id"] = str(rv.get("restaurant_id", ""))
+            if "order_id" in rv:
+                rv["order_id"] = str(rv["order_id"])
             # Ensure date is always a string
             rv["created_at"] = str(rv.get("created_at", ""))
             
