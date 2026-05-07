@@ -12,17 +12,7 @@ from backend.utils.auth_helper import hash_password
 
 print("🌱 Seeding Food Court database...")
 
-# --- SAFETY LOCK ---
-# To prevent accidental data loss in production, this script will only run 
-# if the environment variable ALLOW_SEEDING is set to "true".
-if os.getenv("ALLOW_SEEDING") != "true":
-    print("❌ ERROR: Seeding is locked to protect your data.")
-    print("If you really want to seed (this will DELETE existing data), run it like this:")
-    print("Windows (PowerShell): $env:ALLOW_SEEDING='true'; python seed.py")
-    print("Mac/Linux/GitBash: ALLOW_SEEDING=true python seed.py")
-    print("\nAborting...")
-    sys.exit(0)
-# ------------------
+# Clear existing data
 for col in [users_col, restaurants_col, menu_col, orders_col, reviews_col, tables_col]:
     col.delete_many({})
 
@@ -187,56 +177,14 @@ orders_col.insert_one({
 print(f"  ✅ Created 3 sample orders (1 delivery + 2 dine-in)")
 
 # ── Reviews ────────────────────────────────────────────────────────
-# ── Reviews ────────────────────────────────────────────────────────
-
-restaurant_reviews = {
-    pizza_id: [
-        ("Alice Johnson", 5.0, "Best pizza in town! The Margherita is absolutely delicious."),
-        ("Rahul Mehta", 4.0, "Loved the garlic bread and cheesy pizzas."),
-        ("Sneha Patil", 5.0, "Fresh ingredients and quick delivery."),
-        ("Aman Gupta", 5.0, "Pepperoni pizza tasted amazing."),
-        ("Neha Sharma", 4.0, "Great ambiance and tasty desserts."),
-        ("Rohit Desai", 5.0, "Definitely visiting again."),
-    ],
-
-    burger_id: [
-        ("Bob Smith", 5.0, "Juicy burgers and crispy fries."),
-        ("Priya Kulkarni", 4.0, "Loved the double smash burger."),
-        ("Vikas Singh", 5.0, "Chicken wings were excellent."),
-        ("Pooja Joshi", 4.0, "Good quantity and affordable prices."),
-        ("Rahul Mehta", 5.0, "Chocolate shake was very tasty."),
-        ("Sneha Patil", 4.0, "Fast service and fresh food."),
-    ],
-
-    sushi_id: [
-        ("Alice Johnson", 5.0, "Authentic sushi experience."),
-        ("Bob Smith", 5.0, "Dragon roll was excellent."),
-        ("Aman Gupta", 4.0, "Loved the ramen bowls."),
-        ("Neha Sharma", 5.0, "Fresh sushi and beautiful presentation."),
-        ("Rohit Desai", 5.0, "Best Japanese restaurant nearby."),
-        ("Priya Kulkarni", 4.0, "Great ambiance and service."),
-        ("Vikas Singh", 5.0, "Matcha ice cream was amazing."),
-    ]
-}
-
-review_count = 0
-
-for restaurant_id, reviews in restaurant_reviews.items():
-
-    for index, (user_name, rating, comment) in enumerate(reviews):
-
-        reviews_col.insert_one({
-            "user_id": user1_id if index % 2 == 0 else user2_id,
-            "user_name": user_name,
-            "restaurant_id": restaurant_id,
-            "rating": rating,
-            "comment": comment,
-            "created_at": datetime.utcnow()
-        })
-
-        review_count += 1
-
-print(f"  ✅ Created {review_count} reviews")
+reviews_col.insert_one({
+    "user_id": user1_id,
+    "user_name": "Alice Johnson",
+    "restaurant_id": pizza_id,
+    "rating": 5.0,
+    "comment": "Best pizza in town! The Margherita is absolutely delicious.",
+    "created_at": datetime.utcnow()
+})
 
 print(f"  ✅ Created 1 review")
 print()

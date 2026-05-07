@@ -778,9 +778,19 @@ def get_reviews(restaurant_id):
         rid = None
 
     # Support both ObjectId and string ID to handle legacy/mismatched data
-    query = {"$or": [{"restaurant_id": rid}, {"restaurant_id": restaurant_id}]} if rid else {"restaurant_id": restaurant_id}
+    query_variants = []
+    if rid: 
+        query_variants.append({"restaurant_id": rid})
+        query_variants.append({"restaurant_id": str(rid)})
+    query_variants.append({"restaurant_id": restaurant_id.strip()})
     
-    reviews = list(reviews_col.find(query).sort("created_at", -1).limit(20))
+    # Final fallback: case-insensitive string match
+    query_variants.append({"restaurant_id": {"$regex": f"^{re.escape(restaurant_id.strip())}$", "$options": "i"}})
+
+    reviews = list(reviews_col.find({"$or": query_variants}).sort("created_at", -1).limit(50))
+    
+    # Debug print for server logs
+    print(f"DEBUG: Review query for {restaurant_id} returned {len(reviews)} items.")
     for rv in reviews:
         rv["_id"] = str(rv["_id"])
         rv["user_id"] = str(rv["user_id"])

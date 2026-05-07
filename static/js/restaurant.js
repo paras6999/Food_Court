@@ -572,15 +572,28 @@ async function loadReviews() {
   const container = document.getElementById('reviews-container');
   if (!container) return;
 
-  const data = await apiFetch('/api/restaurant/dashboard', true); 
-  if (data?.error || !data?.restaurant?._id) {
-    container.innerHTML = '<div class="col-12 text-center text-danger">Failed to load restaurant profile.</div>';
+  // Use the ID from localStorage if available, otherwise fetch it
+  let restId = localStorage.getItem('fc_id');
+  if (!restId || getRole() !== 'restaurant') {
+      const data = await apiFetch('/api/restaurant/dashboard', true);
+      if (data?.restaurant?._id) restId = data.restaurant._id;
+  }
+
+  if (!restId) {
+    container.innerHTML = '<div class="col-12 text-center text-danger">Unable to identify restaurant. Please relogin.</div>';
     return;
   }
 
-  const reviews = await apiFetch(`/api/reviews/${data.restaurant._id}`);
+  console.log('Fetching reviews for restaurant:', restId);
+  const reviews = await apiFetch(`/api/reviews/${restId}`);
   
-  if (!Array.isArray(reviews) || reviews.length === 0) {
+  if (!Array.isArray(reviews)) {
+    console.error('Reviews API returned non-array:', reviews);
+    container.innerHTML = '<div class="col-12 text-center text-danger">Error loading reviews from server.</div>';
+    return;
+  }
+
+  if (reviews.length === 0) {
     container.innerHTML = '<div class="col-12 text-center" style="color:var(--text-muted);padding:2rem">No reviews yet. Keep delivering great food!</div>';
     return;
   }
