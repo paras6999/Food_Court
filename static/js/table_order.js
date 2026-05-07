@@ -16,6 +16,7 @@ let menuData = [];
 let isGroupOrder = false;
 let groupCartData = null;
 let groupSyncInterval = null;
+let isGroupCreator = false; // only creator can place the group order
 
 // ── Init ────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -131,17 +132,18 @@ async function startGroupOrder() {
     if (res.cart) {
       isGroupOrder = true;
       groupCartData = res.cart;
+      isGroupCreator = res.cart.is_creator === true;
       tableCart = []; // Clear local cart
       renderTableCart();
 
       // Start polling for updates
       groupSyncInterval = setInterval(syncGroupCart, 3000);
 
-      btn.innerHTML = '👥 Group Order Active';
+      btn.innerHTML = isGroupCreator ? '👑 Group Order Active (You\'re Host)' : '👥 Group Order Joined';
       btn.disabled = true;
       btn.style.background = 'linear-gradient(45deg, #28a745, #20c997)';
 
-      showToast('Group order started! Others can now join.', 'success');
+      showToast(isGroupCreator ? 'Group order started! Others can now join.' : 'Joined group order!', 'success');
     } else {
       showToast(res.error || 'Failed to start group order', 'error');
       btn.innerHTML = '👥 Start Group Order';
@@ -161,6 +163,10 @@ async function syncGroupCart() {
     const res = await apiFetch(`/api/cart/group/sync?restaurant_id=${restaurantId}&table_number=${tableNumber}`, true);
     if (res.cart) {
       groupCartData = res.cart;
+      // Update creator status on sync too
+      if (typeof res.cart.is_creator !== 'undefined') {
+        isGroupCreator = res.cart.is_creator === true;
+      }
       renderTableCart();
     }
   } catch (err) {
@@ -419,6 +425,30 @@ function renderTableCart() {
     
     const totalEl = document.getElementById('cart-total');
     if (totalEl) totalEl.textContent = `₹${finalTotal.toFixed(2)}`;
+
+    // Group order: show Place Order only to creator; others see info message
+    const checkoutBtn = document.getElementById('checkout-btn');
+    const creatorNote = document.getElementById('group-creator-note');
+    if (isGroupOrder) {
+      if (checkoutBtn) checkoutBtn.style.display = isGroupCreator ? '' : 'none';
+      if (!creatorNote) {
+        const note = document.createElement('div');
+        note.id = 'group-creator-note';
+        note.style.cssText = 'text-align:center;color:var(--text-muted);font-size:0.85rem;padding:0.5rem;background:rgba(255,107,53,0.08);border-radius:8px;margin-top:0.5rem;';
+        note.innerHTML = isGroupCreator
+          ? '<i class="bi bi-crown-fill text-warning"></i> You are the group host. Place the order when everyone is ready.'
+          : '<i class="bi bi-info-circle"></i> Waiting for the group host to place the order…';
+        if (checkoutBtn) checkoutBtn.parentNode.insertBefore(note, checkoutBtn.nextSibling);
+      } else {
+        creatorNote.innerHTML = isGroupCreator
+          ? '<i class="bi bi-crown-fill text-warning"></i> You are the group host. Place the order when everyone is ready.'
+          : '<i class="bi bi-info-circle"></i> Waiting for the group host to place the order…';
+      }
+    } else {
+      if (checkoutBtn) checkoutBtn.style.display = '';
+      const note = document.getElementById('group-creator-note');
+      if (note) note.remove();
+    }
   }
 }
 
@@ -436,31 +466,44 @@ async function placeTableOrder() {
     return;
   }
 
+  // Group order: only creator can place
+  if (isGroupOrder && !isGroupCreator) {
+    showToast('Only the group host can place the order', 'error');
+    return;
+  }
+
   const btn = document.getElementById('checkout-btn');
   btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Placing…';
   btn.disabled = true;
 
   const isGuest = !getToken() || getRole() !== 'customer';
 
-  const body = {
-    restaurant_id: restaurantId,
-    table_number: tableNumber,
-    items: cartItems.map(i => ({ item_id: i.itemId || i.item_id, quantity: i.quantity, options: i.options || '' })),
-    address: `Dine-In — Table ${tableNumber}`,
-    coupon_code: window.appliedCoupon || '',
-    mobile_number: document.getElementById('cart-mobile')?.value?.trim() || ''
-  };
-
-  const headers = isGuest ? { 'Content-Type': 'application/json' } : authHeaders();
-
   let res;
   try {
-    const response = await fetch(API + '/api/order', {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify(body)
-    });
-    res = await response.json();
+    if (isGroupOrder) {
+      // Use the dedicated group order endpoint — server enforces creator check
+      res = await apiPost('/api/cart/group/place-order', {
+        restaurant_id: restaurantId,
+        table_number: tableNumber,
+        coupon_code: window.appliedCoupon || '',
+        mobile_number: document.getElementById('cart-mobile')?.value?.trim() || ''
+      }, true);
+    } else {
+      const body = {
+        restaurant_id: restaurantId,
+        table_number: tableNumber,
+        items: cartItems.map(i => ({ item_id: i.itemId || i.item_id, quantity: i.quantity, options: i.options || '' })),
+        address: `Dine-In — Table ${tableNumber}`,
+        coupon_code: window.appliedCoupon || '',
+        mobile_number: document.getElementById('cart-mobile')?.value?.trim() || ''
+      };
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(isGuest ? {} : authHeaders())
+      };
+      const response = await fetch(API + '/api/order', { method: 'POST', headers, body: JSON.stringify(body) });
+      res = await response.json();
+    }
   } catch (err) {
     res = { error: 'Network error' };
   }
@@ -474,6 +517,7 @@ async function placeTableOrder() {
     if (isGroupOrder) {
       groupCartData = null;
       isGroupOrder = false;
+      isGroupCreator = false;
       if (groupSyncInterval) {
         clearInterval(groupSyncInterval);
         groupSyncInterval = null;

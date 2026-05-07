@@ -212,6 +212,7 @@
         if (!restId) { window.location.href = '/'; }
 
         let currentRating = 0;
+        let currentRestaurantData = null;
 
         let originalMenuItems = [];
         let currentMenuFilters = { veg: false, best: false };
@@ -220,6 +221,7 @@
             // Load restaurant details from the restaurants list
             const rests = await apiFetch('/api/restaurants');
             const rest = Array.isArray(rests) ? rests.find(r => r._id === restId) : null;
+            currentRestaurantData = rest;
             let restName = "Restaurant";
             if (rest) {
                 restName = rest.name.replace(/'/g, "\\'");

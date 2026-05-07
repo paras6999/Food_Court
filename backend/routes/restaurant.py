@@ -32,7 +32,10 @@ def _order_to_dict(o):
 @role_required("restaurant")
 def dashboard():
     rest_id = ObjectId(get_jwt_identity())
-    orders = list(orders_col.find({"restaurant_id": rest_id}))
+    orders = list(orders_col.find({
+        "restaurant_id": rest_id,
+        "order_type": {"$ne": "service-request"}
+    }))
     total_orders = len(orders)
     revenue = sum(o.get("total_price", 0) for o in orders if o.get("status") not in ["rejected"])
     pending = sum(1 for o in orders if o.get("status") == "pending")
@@ -124,8 +127,8 @@ def top_sold_dishes():
             dish_stats[item_id]["quantity"] += qty
             dish_stats[item_id]["revenue"] += qty * price
     
-    # Sort by quantity (descending) and get top 10
-    sorted_dishes = sorted(dish_stats.items(), key=lambda x: x[1]["quantity"], reverse=True)[:10]
+    # Sort by quantity (descending) — return ALL dishes (frontend will handle top 10 + Others)
+    sorted_dishes = sorted(dish_stats.items(), key=lambda x: x[1]["quantity"], reverse=True)
     
     result = []
     for item_id, stats in sorted_dishes:
@@ -239,12 +242,53 @@ def delete_menu_item(item_id):
 def get_restaurant_orders():
     rest_id = ObjectId(get_jwt_identity())
     status_filter = request.args.get("status")
-    filt = {"restaurant_id": rest_id}
+    filt = {"restaurant_id": rest_id, "order_type": {"$ne": "service-request"}}
     if status_filter:
         filt["status"] = status_filter
 
     raw = list(orders_col.find(filt).sort("created_at", -1))
     return jsonify([_order_to_dict(o) for o in raw]), 200
+
+
+# ── Get Assistance Requests ─────────────────────────────────────────────────────
+@restaurant_bp.route("/api/restaurant/assistance", methods=["GET"])
+@role_required("restaurant")
+def get_assistance_requests():
+    rest_id = ObjectId(get_jwt_identity())
+    raw = list(orders_col.find({
+        "restaurant_id": rest_id,
+        "order_type": "service-request"
+    }).sort("created_at", -1).limit(50))
+    
+    result = []
+    for o in raw:
+        result.append({
+            "_id": str(o["_id"]),
+            "table_number": o.get("table_number", "—"),
+            "request_type": o.get("request_type", "waiter"),
+            "status": o.get("status", "pending"),
+            "created_at": o["created_at"].isoformat() if isinstance(o.get("created_at"), datetime) else str(o.get("created_at", ""))
+        })
+    return jsonify(result), 200
+
+
+# ── Resolve Assistance Request ──────────────────────────────────────────────────
+@restaurant_bp.route("/api/restaurant/assistance/<request_id>/resolve", methods=["PUT"])
+@role_required("restaurant")
+def resolve_assistance(request_id):
+    rest_id = ObjectId(get_jwt_identity())
+    try:
+        oid = ObjectId(request_id)
+    except Exception:
+        return jsonify({"error": "Invalid request id"}), 400
+
+    result = orders_col.update_one(
+        {"_id": oid, "restaurant_id": rest_id, "order_type": "service-request"},
+        {"$set": {"status": "resolved", "resolved_at": datetime.utcnow()}}
+    )
+    if result.matched_count == 0:
+        return jsonify({"error": "Request not found"}), 404
+    return jsonify({"message": "Assistance request resolved"}), 200
 
 
 # ── Update Order Status ─────────────────────────────────────────────────────────
@@ -293,12 +337,17 @@ def update_offer():
     rest_id = ObjectId(get_jwt_identity())
     data = request.get_json() or {}
     offer_text = data.get("offer", "").strip()
-    discount_pct = data.get("discount_pct", 0)
+    
+    try:
+        discount_pct = float(data.get("discount_pct") or 0)
+    except:
+        discount_pct = 0.0
+        
     allow_coupons = data.get("allow_coupons", True)  # Default to true for backward compatibility
 
     restaurants_col.update_one({"_id": rest_id}, {"$set": {
         "offer": offer_text,
-        "discount_pct": float(discount_pct),
+        "discount_pct": discount_pct,
         "allow_coupons": allow_coupons
     }})
     return jsonify({"message": "Offer updated successfully"}), 200
@@ -534,7 +583,7 @@ def ai_analyst():
 
     # Gather context data
     rest = restaurants_col.find_one({"_id": rest_id}, {"password": 0})
-    orders = list(orders_col.find({"restaurant_id": rest_id}))
+    orders = list(orders_col.find({"restaurant_id": rest_id, "order_type": {"$ne": "service-request"}}))
     reviews = list(reviews_col.find({"restaurant_id": rest_id}))
 
     total_revenue = sum(o.get("total_price", 0) for o in orders if o.get("status") not in ["rejected", "cancelled"])
@@ -545,16 +594,54 @@ def ai_analyst():
     avg_rating = rest.get("rating", 0)
     total_ratings = rest.get("totalRatings", 0)
 
+    # Item-level analytics for AI context
+    item_stats = {}
+    hourly_orders = {}
+    for o in orders:
+        if o.get("status") in ["rejected", "cancelled"]:
+            continue
+        for item in o.get("items", []):
+            name = item.get("name", "Unknown")
+            qty = item.get("quantity", 0)
+            price = item.get("price", 0)
+            if name not in item_stats:
+                item_stats[name] = {"qty": 0, "revenue": 0}
+            item_stats[name]["qty"] += qty
+            item_stats[name]["revenue"] += qty * price
+        # Track peak hours
+        if isinstance(o.get("created_at"), datetime):
+            hour = o["created_at"].hour
+            hourly_orders[hour] = hourly_orders.get(hour, 0) + 1
+
+    # Sort items by quantity sold
+    top_items = sorted(item_stats.items(), key=lambda x: x[1]["qty"], reverse=True)
+    low_items = sorted(item_stats.items(), key=lambda x: x[1]["qty"])[:5]
+
+    # Peak hours
+    peak_hours = sorted(hourly_orders.items(), key=lambda x: x[1], reverse=True)[:3]
+
     # Convert to concise string to avoid massive prompts
     context = f"""
     Restaurant Name: {rest.get('name', 'Unknown')}
     Cuisine: {rest.get('cuisine', 'Unknown')}
-    Total Revenue: ₹{total_revenue}
+    Total Revenue: ₹{total_revenue:.2f}
     Total Orders: {total_orders} ({dine_in_orders} Dine-in, {delivery_orders} Delivery)
     Average Rating: {avg_rating} ⭐ from {total_ratings} reviews.
     
-    Recent Reviews Sample:
+    Top 10 Selling Items:
     """
+    for name, stats in top_items[:10]:
+        context += f"- {name}: {stats['qty']} sold, ₹{stats['revenue']:.0f} revenue\n"
+    
+    context += "\n    Lowest Performing Items:\n"
+    for name, stats in low_items:
+        context += f"- {name}: {stats['qty']} sold, ₹{stats['revenue']:.0f} revenue\n"
+    
+    context += f"\n    Peak Order Hours: "
+    for hour, count in peak_hours:
+        context += f"{hour}:00 ({count} orders), "
+    
+    context += "\n\n    Recent Reviews Sample:\n"
     for r in reviews[-5:]:
         context += f"- {r.get('rating')}⭐: {r.get('comment')}\n"
 
@@ -590,3 +677,80 @@ def ai_analyst():
             return jsonify({"response": f"⚠️ **API Error:** {r_json.get('error', {}).get('message', 'Unknown error')}"}), 200
     except Exception as e:
         return jsonify({"response": f"⚠️ **Connection Error:** Failed to connect to Gemini API. {str(e)}"}), 200
+
+# ══════════════════════════════════════════════════════════════════════════════
+# OFFLINE ORDER / POS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@restaurant_bp.route("/api/restaurant/offline_order", methods=["POST"])
+@role_required("restaurant")
+def create_offline_order():
+    try:
+        rest_id = ObjectId(get_jwt_identity())
+        data = request.get_json() or {}
+        
+        items = data.get("items", [])
+        mobile_number = str(data.get("mobile_number") or "").strip()
+        
+        try:
+            discount = float(data.get("discount", 0))
+        except:
+            discount = 0.0
+            
+        if not items:
+            return jsonify({"error": "Order must contain at least one item"}), 400
+            
+        total_price = 0
+        enriched_items = []
+        
+        for item in items:
+            try:
+                iid = ObjectId(item.get("item_id"))
+                menu_item = menu_col.find_one({"_id": iid, "restaurant_id": rest_id})
+                if not menu_item:
+                    continue
+                    
+                qty = int(item.get("quantity", 1))
+                price = float(menu_item.get("price", 0))
+                
+                total_price += price * qty
+                enriched_items.append({
+                    "item_id": str(iid),
+                    "name": menu_item.get("name", "Item"),
+                    "price": price,
+                    "quantity": qty
+                })
+            except Exception:
+                continue
+                
+        if not enriched_items:
+            return jsonify({"error": "No valid items found in order"}), 400
+            
+        if discount > total_price:
+            discount = total_price
+            
+        final_price = total_price - discount
+        
+        order_doc = {
+            "user_id": "guest",
+            "restaurant_id": rest_id,
+            "items": enriched_items,
+            "subtotal": round(total_price, 2),
+            "total_price": round(final_price, 2),
+            "discount_amount": round(discount, 2),
+            "customer_mobile": mobile_number,
+            "address": "Offline Order (Walk-in)",
+            "status": "delivered",  # Offline orders are immediately fulfilled
+            "order_type": "offline",
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+        
+        order_id = orders_col.insert_one(order_doc).inserted_id
+        
+        return jsonify({
+            "message": "Offline order created successfully", 
+            "order_id": str(order_id)
+        }), 201
+    except Exception as e:
+        return jsonify({"error": f"Internal Error: {str(e)}"}), 500

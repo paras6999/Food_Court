@@ -29,24 +29,41 @@ async function apiFetch(path, withAuth = false) {
 }
 
 async function apiPost(path, body, withAuth = false) {
-  const headers = withAuth ? authHeaders() : { 'Content-Type': 'application/json' };
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(withAuth ? authHeaders() : {})
+  };
   try {
     const r = await fetch(API + path, {
       method: 'POST',
       headers,
       body: JSON.stringify(body)
     });
-    return await r.json();
+    
+    // Check if response is JSON
+    const contentType = r.headers.get("content-type");
+    if (contentType && contentType.indexOf("application/json") !== -1) {
+        return await r.json();
+    } else {
+        const text = await r.text();
+        console.error('Non-JSON response from server:', text);
+        return { error: `Server error: ${r.status}` };
+    }
   } catch (err) {
+    console.error('Network/fetch error:', err);
     return { error: 'Network error' };
   }
 }
 
 async function apiPut(path, body) {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...authHeaders()
+  };
   try {
     const r = await fetch(API + path, {
       method: 'PUT',
-      headers: authHeaders(),
+      headers,
       body: JSON.stringify(body)
     });
     return await r.json();
@@ -92,6 +109,31 @@ async function applyCoupon(restaurantId = null) {
     return;
   }
   
+  // Auto-detect restaurant_id from cart if not provided
+  if (!restaurantId) {
+      // Try from table ordering context
+      if (typeof window.restaurantId !== 'undefined' && window.restaurantId) {
+          restaurantId = window.restaurantId;
+      } else {
+          // Try from delivery cart keys
+          try {
+              const cart = JSON.parse(localStorage.getItem('fc_cart') || '{}');
+              const restIds = Object.keys(cart);
+              if (restIds.length === 1) {
+                  restaurantId = restIds[0];
+              } else if (restIds.length > 1) {
+                  // Multiple restaurants — use the first one (coupon is per-restaurant)
+                  restaurantId = restIds[0];
+              }
+          } catch(e) {}
+      }
+  }
+  
+  if (!restaurantId) {
+      msgEl.innerHTML = '<span class="text-danger">Please add items to cart first before applying coupon.</span>';
+      return;
+  }
+  
   // Need to get current subtotal from UI or global logic
   let subtotal = 0;
   if (typeof window.getCartSubtotal === 'function') {
@@ -104,8 +146,7 @@ async function applyCoupon(restaurantId = null) {
   
   msgEl.innerHTML = '<span style="color:var(--text-muted)">Validating...</span>';
   
-  const payload = { code, subtotal };
-  if (restaurantId) payload.restaurant_id = restaurantId;
+  const payload = { code, subtotal, restaurant_id: restaurantId };
   
   const res = await apiPost('/api/coupon/validate', payload, true);
   if (res.valid) {
@@ -303,6 +344,28 @@ function openItemDetails(itemId, name, price, restId, restName, image, desc, isV
     bsModalEl.dataset.restId = restId;
     bsModalEl.dataset.restName = restName || 'Restaurant';
     
+    // AI Suggestion Logic
+    const lowerName = name.toLowerCase();
+    let suggestName = "";
+    let suggestPrice = 0;
+    
+    if (lowerName.includes("pizza")) {
+        suggestName = "Chilled Coca-Cola (330ml) 🥤";
+        suggestPrice = 45;
+    } else if (lowerName.includes("burger")) {
+        suggestName = "Crispy French Fries (M) 🍟";
+        suggestPrice = 80;
+    } else if (lowerName.includes("sandwich") || lowerName.includes("wrap")) {
+        suggestName = "Fresh Mango Juice 🥤";
+        suggestPrice = 70;
+    } else if (lowerName.includes("biryani") || lowerName.includes("rice")) {
+        suggestName = "Cold Raita & Salan Bowl 🥣";
+        suggestPrice = 30;
+    } else {
+        suggestName = "Chilled Coca-Cola (330ml) 🥤";
+        suggestPrice = 45;
+    }
+    
     updateBsPrice();
     
     // Set add btn click
@@ -315,9 +378,11 @@ function openItemDetails(itemId, name, price, restId, restName, image, desc, isV
         
         const optionsStr = `Spicy: ${spicy}${addons ? ' | Add-ons: ' + addons : ''}`;
         
+        const isTableMode = typeof addToTableCart === 'function';
+        
         // We use the dynamic finalPrice and options
         // Check if addToTableCart exists (table mode) or addToCart (delivery mode)
-        if (typeof addToTableCart === 'function') {
+        if (isTableMode) {
             addToTableCart(itemId, name, finalPrice, optionsStr);
             triggerFlyingCart(e, itemId);
         } else if (typeof addToCart === 'function') {
@@ -326,6 +391,11 @@ function openItemDetails(itemId, name, price, restId, restName, image, desc, isV
         }
         
         bootstrap.Offcanvas.getInstance(bsModal).hide();
+        
+        // Show AI Recommendation Modal
+        setTimeout(() => {
+            showAiSuggestionModal(name, suggestName, suggestPrice, restId, restName, isTableMode);
+        }, 600);
     };
 
     const bs = new bootstrap.Offcanvas(bsModal);
@@ -392,6 +462,46 @@ function triggerFlyingCart(e, itemId) {
             setTimeout(() => badge.style.transform = 'scale(1)', 200);
         }
     }, 800);
+}
+
+function showAiSuggestionModal(itemName, suggestName, suggestPrice, restId, restName, isTableMode) {
+    const oldModal = document.getElementById('aiSuggestionModal');
+    if (oldModal) oldModal.remove();
+
+    const html = `
+    <div class="modal fade" id="aiSuggestionModal" tabindex="-1" aria-hidden="true" style="backdrop-filter: blur(5px);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content" style="background: var(--card-bg); border: 1px solid var(--border); border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.15);">
+                <div class="modal-body text-center p-4">
+                    <div style="font-size: 3rem; margin-bottom: 1rem; animation: pulse 2s infinite;">✨</div>
+                    <h4 style="font-weight: 800; color: var(--text-primary); margin-bottom: 0.5rem;">Pair Your Meal! 🍕</h4>
+                    <p style="color: var(--text-muted); font-size: 0.95rem; margin-bottom: 1.5rem;">
+                        Would you like to pair your delicious <strong>${itemName}</strong> with a cold, refreshing <strong>${suggestName}</strong> for just <strong class="text-success">₹${suggestPrice}</strong>?
+                    </p>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-custom flex-grow-1" data-bs-dismiss="modal" style="border-radius: 50px; padding: 0.8rem; border-color: var(--border); color: var(--text-primary)">No, Thanks</button>
+                        <button type="button" class="btn btn-primary-custom flex-grow-1" id="ai-suggestion-confirm-btn" style="border-radius: 50px; padding: 0.8rem;">Yes, Add it! 🥤</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', html);
+    const modalEl = document.getElementById('aiSuggestionModal');
+    const modal = new bootstrap.Modal(modalEl);
+    
+    document.getElementById('ai-suggestion-confirm-btn').onclick = () => {
+        const mockItemId = "mock_suggest_" + Math.random().toString(36).substr(2, 9);
+        if (isTableMode) {
+            addToTableCart(mockItemId, suggestName, suggestPrice, "AI Suggestion");
+        } else {
+            addToCart(mockItemId, suggestName, suggestPrice, restId, "AI Suggestion", restName);
+        }
+        modal.hide();
+    };
+    
+    modal.show();
 }
 
 

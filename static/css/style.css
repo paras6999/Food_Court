@@ -445,6 +445,11 @@ body {
     font-size: 0.95rem;
 }
 
+select.fc-input option {
+    background-color: var(--surface);
+    color: var(--text-primary);
+}
+
 .fc-input:focus {
     outline: none !important;
     border-color: var(--primary) !important;

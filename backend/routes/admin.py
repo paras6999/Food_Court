@@ -101,7 +101,7 @@ def delete_restaurant(rest_id):
 @admin_bp.route("/api/admin/orders", methods=["GET"])
 @role_required("admin")
 def list_orders():
-    raw = list(orders_col.find({}).sort("created_at", -1).limit(200))
+    raw = list(orders_col.find({"order_type": {"$ne": "service-request"}}).sort("created_at", -1).limit(200))
     result = []
     for o in raw:
         d = _order(o)
@@ -117,11 +117,40 @@ def list_orders():
 def stats():
     total_users = users_col.count_documents({})
     total_restaurants = restaurants_col.count_documents({})
-    total_orders = orders_col.count_documents({})
-    revenue = sum(o.get("total_price", 0) for o in orders_col.find({"status": {"$nin": ["rejected"]}}, {"total_price": 1}))
+    total_orders = orders_col.count_documents({"order_type": {"$ne": "service-request"}})
+    revenue = sum(o.get("total_price", 0) for o in orders_col.find({
+        "status": {"$nin": ["rejected"]},
+        "order_type": {"$ne": "service-request"}
+    }, {"total_price": 1}))
     return jsonify({
         "total_users": total_users,
         "total_restaurants": total_restaurants,
         "total_orders": total_orders,
         "total_revenue": revenue
     }), 200
+
+
+# ── Per-Restaurant Revenue Stats ────────────────────────────────────────────────
+@admin_bp.route("/api/admin/revenue-stats", methods=["GET"])
+@role_required("admin")
+def revenue_stats():
+    rests = list(restaurants_col.find({}, {"name": 1}))
+    result = []
+    for r in rests:
+        rid = r["_id"]
+        orders = list(orders_col.find({
+            "restaurant_id": rid,
+            "status": {"$in": ["accepted", "preparing", "ready", "delivered"]},
+            "order_type": {"$ne": "service-request"}
+        }, {"total_price": 1}))
+        revenue = sum(o.get("total_price", 0) for o in orders)
+        order_count = len(orders)
+        result.append({
+            "_id": str(rid),
+            "name": r.get("name", "Unknown"),
+            "revenue": round(revenue, 2),
+            "order_count": order_count
+        })
+    # Sort by revenue descending
+    result.sort(key=lambda x: x["revenue"], reverse=True)
+    return jsonify(result), 200

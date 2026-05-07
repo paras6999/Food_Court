@@ -167,13 +167,34 @@ def place_order():
     # Validate and enrich items
     total = 0
     enriched = []
+    # Validate and enrich items
+    total = 0
+    enriched = []
     for item in items:
+        item_id_str = str(item.get("item_id", ""))
+        is_custom = False
+        menu_item = None
         try:
-            menu_item = menu_col.find_one({"_id": ObjectId(item["item_id"])})
+            oid = ObjectId(item_id_str)
+            menu_item = menu_col.find_one({"_id": oid})
         except Exception:
-            return jsonify({"error": f"Invalid item_id {item.get('item_id')}"}), 400
+            is_custom = True
+            
+        if is_custom:
+            qty = int(item.get("quantity", 1))
+            price = float(item.get("price", 0))
+            name = item.get("name", "Custom Item")
+            total += price * qty
+            enriched.append({
+                "item_id": item_id_str,
+                "name": name,
+                "quantity": qty,
+                "price": price
+            })
+            continue
+
         if not menu_item:
-            return jsonify({"error": f"Menu item not found: {item.get('item_id')}"}), 404
+            return jsonify({"error": f"Menu item not found: {item_id_str}"}), 404
         qty = int(item.get("quantity", 1))
         price = menu_item["price"]
         total += price * qty
@@ -202,19 +223,22 @@ def place_order():
         
         if coupon_doc:
             valid = True
-            if coupon_doc.get("min_order", 0) > total: 
+            min_order = float(coupon_doc.get("min_order", 0))
+            if min_order > total: 
                 valid = False
             if coupon_doc.get("first_order_only") and user_id:
                 if orders_col.count_documents({"user_id": ObjectId(user_id)}) > 0: 
                     valid = False
             
             if valid:
+                c_val = float(coupon_doc.get("value", 0))
+                c_max = float(coupon_doc.get("max_discount", 999999))
                 if coupon_doc["type"] == "percent":
-                    coupon_discount = (coupon_doc["value"] / 100.0) * total
-                    if coupon_discount > coupon_doc.get("max_discount", 999999):
-                        coupon_discount = coupon_doc.get("max_discount", 999999)
+                    coupon_discount = (c_val / 100.0) * total
+                    if coupon_discount > c_max:
+                        coupon_discount = c_max
                 elif coupon_doc["type"] == "flat":
-                    coupon_discount = coupon_doc["value"]
+                    coupon_discount = c_val
                 if coupon_discount > total: 
                     coupon_discount = total
                 total -= coupon_discount
@@ -298,14 +322,19 @@ def join_group_cart():
 
     # Find or create group cart
     group_cart = group_carts_col.find_one({"restaurant_id": rid, "table_number": table_number})
+    is_creator = False
     if not group_cart:
         group_cart = {
             "restaurant_id": rid,
             "table_number": table_number,
+            "created_by": user_id,
             "participants": [],
             "items": [],
             "created_at": datetime.utcnow()
         }
+        is_creator = True
+    else:
+        is_creator = group_cart.get("created_by") == user_id
 
     # Add user if not already participating
     if not any(p["user_id"] == user_id for p in group_cart.get("participants", [])):
@@ -320,7 +349,9 @@ def join_group_cart():
             upsert=True
         )
 
-    return jsonify({"message": "Joined group cart", "cart": _group_cart_to_dict(group_cart)}), 200
+    cart_dict = _group_cart_to_dict(group_cart)
+    cart_dict["is_creator"] = is_creator
+    return jsonify({"message": "Joined group cart", "cart": cart_dict}), 200
 
 @customer_bp.route("/api/cart/group/add", methods=["POST"])
 @role_required("customer")
@@ -481,8 +512,11 @@ def sync_group_cart():
     return jsonify({"cart": _group_cart_to_dict(group_cart)}), 200
 
 def _group_cart_to_dict(gc):
-    gc["_id"] = str(gc["_id"])
+    if "_id" in gc:
+        gc["_id"] = str(gc["_id"])
     gc["restaurant_id"] = str(gc["restaurant_id"])
+    if "created_by" in gc:
+        gc["created_by"] = str(gc["created_by"])
     for item in gc.get("items", []):
         item["item_id"] = str(item["item_id"])
         item["added_by_id"] = str(item["added_by_id"])
@@ -490,9 +524,110 @@ def _group_cart_to_dict(gc):
         p["user_id"] = str(p["user_id"])
     return gc
 
+@customer_bp.route("/api/cart/group/place-order", methods=["POST"])
+@role_required("customer")
+def place_group_order():
+    try:
+        data = request.get_json() or {}
+        restaurant_id = data.get("restaurant_id")
+        table_number = data.get("table_number")
+
+        if not restaurant_id or table_number is None:
+            return jsonify({"error": "restaurant_id and table_number required"}), 400
+
+        try:
+            rid = ObjectId(restaurant_id)
+        except Exception:
+            return jsonify({"error": "Invalid restaurant id"}), 400
+
+        table_number = int(table_number)
+        user_id = get_jwt_identity()
+
+        group_cart = group_carts_col.find_one({"restaurant_id": rid, "table_number": table_number})
+        if not group_cart:
+            return jsonify({"error": "No group cart found"}), 404
+
+        if group_cart.get("created_by") != user_id:
+            return jsonify({"error": "Only the person who started the group order can place it"}), 403
+
+        cart_items = group_cart.get("items", [])
+        if not cart_items:
+            return jsonify({"error": "Group cart is empty"}), 400
+
+        total = 0
+        enriched = []
+        for item in cart_items:
+            qty = int(item.get("quantity", 1))
+            price = float(item.get("price", 0))
+            total += price * qty
+            enriched.append({
+                "item_id": item.get("item_id"),
+                "name": item.get("name", "Item"),
+                "quantity": qty,
+                "price": price
+            })
+
+        original_total = total
+        restaurant_discount = 0
+        rest = restaurants_col.find_one({"_id": rid})
+        if user_id and rest and rest.get("discount_pct"):
+            r_discount = float(rest.get("discount_pct", 0))
+            restaurant_discount = total * (r_discount / 100)
+            total -= restaurant_discount
+
+        mobile_number = data.get("mobile_number", "").strip()
+        coupon_code = data.get("coupon_code", "").upper().strip()
+
+        coupon_discount = 0
+        if coupon_code:
+            coupon_doc = coupons_col.find_one({"restaurant_id": rid, "code": coupon_code, "enabled": True})
+            if not coupon_doc and coupon_code in COUPONS:
+                coupon_doc = COUPONS[coupon_code]
+            if coupon_doc:
+                c_val = float(coupon_doc.get("value", 0))
+                c_max = float(coupon_doc.get("max_discount", 999999))
+                if coupon_doc["type"] == "percent":
+                    coupon_discount = (c_val / 100.0) * total
+                    if coupon_discount > c_max:
+                        coupon_discount = c_max
+                elif coupon_doc["type"] == "flat":
+                    coupon_discount = c_val
+                if coupon_discount > total:
+                    coupon_discount = total
+                total -= coupon_discount
+
+        order_doc = {
+            "user_id": ObjectId(user_id),
+            "restaurant_id": rid,
+            "items": enriched,
+            "subtotal": round(original_total, 2),
+            "restaurant_discount": round(restaurant_discount, 2),
+            "coupon_code": coupon_code if coupon_discount > 0 else "",
+            "coupon_discount": round(coupon_discount, 2),
+            "total_price": round(total, 2),
+            "address": f"Dine-In — Table {table_number}",
+            "status": "pending",
+            "created_at": datetime.utcnow(),
+            "table_number": table_number,
+            "order_type": "dine-in",
+            "is_group_order": True,
+            "group_participants": [p.get("user_name", "Guest") for p in group_cart.get("participants", [])]
+        }
+
+        if mobile_number:
+            order_doc["customer_mobile"] = mobile_number
+
+        order_id = orders_col.insert_one(order_doc).inserted_id
+
+        group_carts_col.delete_one({"restaurant_id": rid, "table_number": table_number})
+
+        return jsonify({"message": "Group order placed successfully!", "order_id": str(order_id)}), 201
+    except Exception as e:
+        return jsonify({"error": f"Internal error placing group order: {str(e)}"}), 500
+
 # ── Service Request (Call Waiter) ──────────────────────────────────────────────
 @customer_bp.route("/api/service-request", methods=["POST"])
-@role_required("customer")
+@jwt_required(optional=True)
 def service_request():
     data = request.get_json()
     restaurant_id = data.get("restaurant_id")
@@ -509,9 +644,12 @@ def service_request():
 
     table_number = int(table_number)
 
+    user_id = get_jwt_identity()
+    user_oid = ObjectId(user_id) if user_id else "guest"
+
     # Store the service request
     orders_col.insert_one({
-        "user_id": ObjectId(get_jwt_identity()),
+        "user_id": user_oid,
         "restaurant_id": rid,
         "table_number": table_number,
         "order_type": "service-request",
@@ -531,7 +669,10 @@ def service_request():
 @role_required("customer")
 def my_orders():
     user_id = get_jwt_identity()
-    raw = list(orders_col.find({"user_id": ObjectId(user_id)}).sort("created_at", -1))
+    raw = list(orders_col.find({
+        "user_id": ObjectId(user_id),
+        "order_type": {"$ne": "service-request"}
+    }).sort("created_at", -1))
 
     # Attach restaurant names
     result = []
@@ -561,7 +702,10 @@ def guest_orders():
     if not valid_oids:
         return jsonify([]), 200
         
-    raw = list(orders_col.find({"_id": {"$in": valid_oids}}).sort("created_at", -1))
+    raw = list(orders_col.find({
+        "_id": {"$in": valid_oids},
+        "order_type": {"$ne": "service-request"}
+    }).sort("created_at", -1))
     
     result = []
     for o in raw:
@@ -781,7 +925,11 @@ def validate_coupon():
     })
 
     if not coupon_doc:
-        return jsonify({"valid": False, "message": "Invalid coupon code for this restaurant"}), 400
+        # Check global coupons
+        if code in COUPONS:
+            coupon_doc = COUPONS[code]
+        else:
+            return jsonify({"valid": False, "message": "Invalid coupon code for this restaurant"}), 400
 
     if coupon_doc.get("min_order", 0) > subtotal:
         return jsonify({"valid": False, "message": f"Minimum order of ₹{coupon_doc.get('min_order', 0)} required"}), 400
@@ -889,12 +1037,30 @@ def verify_payment_and_place_order():
     total = 0
     enriched = []
     for item in items:
+        item_id_str = str(item.get("item_id", ""))
+        is_custom = False
+        menu_item = None
         try:
-            menu_item = menu_col.find_one({"_id": ObjectId(item["item_id"])})
+            oid = ObjectId(item_id_str)
+            menu_item = menu_col.find_one({"_id": oid})
         except Exception:
-            return jsonify({"error": f"Invalid item_id {item.get('item_id')}"}), 400
+            is_custom = True
+            
+        if is_custom:
+            qty = int(item.get("quantity", 1))
+            price = float(item.get("price", 0))
+            name = item.get("name", "Custom Item")
+            total += price * qty
+            enriched.append({
+                "item_id": item_id_str,
+                "name": name,
+                "quantity": qty,
+                "price": price
+            })
+            continue
+
         if not menu_item:
-            return jsonify({"error": f"Menu item not found: {item.get('item_id')}"}), 404
+            return jsonify({"error": f"Menu item not found: {item_id_str}"}), 404
         qty = int(item.get("quantity", 1))
         price = menu_item["price"]
         total += price * qty
@@ -905,11 +1071,14 @@ def verify_payment_and_place_order():
             "price": price
         })
 
+    original_total = total
+    restaurant_discount = 0
     # Apply restaurant discount if the user is logged in
     rest = restaurants_col.find_one({"_id": rid})
     if user_id and rest and rest.get("discount_pct"):
         r_discount = float(rest.get("discount_pct", 0))
-        total = total * (1 - (r_discount / 100))
+        restaurant_discount = total * (r_discount / 100)
+        total -= restaurant_discount
 
     # Apply per-restaurant coupon discount
     coupon_code = data.get("coupon_code", "").upper().strip()
@@ -921,21 +1090,27 @@ def verify_payment_and_place_order():
             "enabled": True
         })
         
+        if not coupon_doc and coupon_code in COUPONS:
+            coupon_doc = COUPONS[coupon_code]
+            
         if coupon_doc:
             valid = True
-            if coupon_doc.get("min_order", 0) > total: 
+            min_order = float(coupon_doc.get("min_order", 0))
+            if min_order > total: 
                 valid = False
             if coupon_doc.get("first_order_only") and user_id:
                 if orders_col.count_documents({"user_id": ObjectId(user_id)}) > 0: 
                     valid = False
             
             if valid:
+                c_val = float(coupon_doc.get("value", 0))
+                c_max = float(coupon_doc.get("max_discount", 999999))
                 if coupon_doc["type"] == "percent":
-                    coupon_discount = (coupon_doc["value"] / 100.0) * total
-                    if coupon_discount > coupon_doc.get("max_discount", 999999):
-                        coupon_discount = coupon_doc.get("max_discount", 999999)
+                    coupon_discount = (c_val / 100.0) * total
+                    if coupon_discount > c_max:
+                        coupon_discount = c_max
                 elif coupon_doc["type"] == "flat":
-                    coupon_discount = coupon_doc["value"]
+                    coupon_discount = c_val
                 if coupon_discount > total: 
                     coupon_discount = total
                 total -= coupon_discount
@@ -964,12 +1139,16 @@ def verify_payment_and_place_order():
             users_col.update_one({"_id": ObjectId(user_id)}, {"$inc": {"fc_points": earned_points}})
 
     order_doc = {
-        "user_id": ObjectId(user_id),
+        "user_id": ObjectId(user_id) if user_id else "guest",
         "restaurant_id": rid,
         "items": enriched,
+        "subtotal": round(original_total, 2),
+        "restaurant_discount": round(restaurant_discount, 2),
+        "coupon_code": coupon_code if coupon_discount > 0 else "",
+        "coupon_discount": round(coupon_discount, 2),
         "total_price": round(total, 2),
         "points_used": points_used,
-        "points_discount": points_discount,
+        "points_discount": round(points_discount, 2),
         "earned_points": earned_points,
         "address": address,
         "status": "pending",

@@ -10,6 +10,60 @@ async function loadStats() {
   set('a-restaurants', data.total_restaurants ?? '—');
   set('a-orders', data.total_orders ?? '—');
   set('a-revenue', `₹${(data.total_revenue || 0).toFixed(2)}`);
+  loadAdminRevenueChart();
+}
+
+let adminRevenueChart = null;
+async function loadAdminRevenueChart() {
+  const data = await apiFetch('/api/admin/revenue-stats', true);
+  if (!data || data.error || !Array.isArray(data) || data.length === 0) return;
+
+  const ctx = document.getElementById('adminRevenueChart');
+  if (!ctx) return;
+
+  if (adminRevenueChart) adminRevenueChart.destroy();
+
+  const top = data.slice(0, 15); // limit to top 15 for readability
+  adminRevenueChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: top.map(r => r.name),
+      datasets: [{
+        label: 'Revenue (₹)',
+        data: top.map(r => r.revenue),
+        backgroundColor: 'rgba(255,107,53,0.6)',
+        borderColor: 'rgba(255,107,53,1)',
+        borderWidth: 1,
+        borderRadius: 4
+      }, {
+        label: 'Orders',
+        data: top.map(r => r.order_count),
+        backgroundColor: 'rgba(32,201,151,0.5)',
+        borderColor: 'rgba(32,201,151,1)',
+        borderWidth: 1,
+        borderRadius: 4,
+        yAxisID: 'y1'
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: '#8892a4' } },
+        tooltip: {
+          callbacks: {
+            label: ctx => ctx.dataset.label === 'Revenue (₹)'
+              ? `₹${ctx.parsed.y.toFixed(2)}`
+              : `${ctx.parsed.y} orders`
+          }
+        }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#8892a4', maxRotation: 30 } },
+        y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#8892a4', callback: v => '₹' + v } },
+        y1: { beginAtZero: true, position: 'right', grid: { display: false }, ticks: { color: '#20c997' } }
+      }
+    }
+  });
 }
 
 async function loadUsers() {

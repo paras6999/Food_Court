@@ -62,6 +62,140 @@ async function loadRevenueGraph() {
   });
 }
 
+// ── Top Dishes Pie Chart ────────────────────────────────
+let dishPieChart = null;
+let dishPieMode = 'quantity'; // 'quantity' or 'revenue'
+let allDishData = [];
+
+async function loadTopDishesChart() {
+  const data = await apiFetch('/api/restaurant/top_dishes', true);
+  if (!data || data.error || !Array.isArray(data)) return;
+  allDishData = data;
+  renderDishPieChart();
+}
+
+function setDishPieMode(mode) {
+  dishPieMode = mode;
+  document.getElementById('pie-mode-qty').classList.toggle('active', mode === 'quantity');
+  document.getElementById('pie-mode-rev').classList.toggle('active', mode === 'revenue');
+  renderDishPieChart();
+}
+
+function renderDishPieChart() {
+  const ctx = document.getElementById('dishPieChart');
+  if (!ctx || allDishData.length === 0) return;
+
+  if (dishPieChart) dishPieChart.destroy();
+
+  const top10 = allDishData.slice(0, 10);
+  const others = allDishData.slice(10);
+
+  const labels = top10.map(d => d.name);
+  let values;
+  if (dishPieMode === 'quantity') {
+    values = top10.map(d => d.quantity_sold);
+    if (others.length > 0) {
+      labels.push('Others');
+      values.push(others.reduce((s, d) => s + d.quantity_sold, 0));
+    }
+  } else {
+    values = top10.map(d => d.revenue);
+    if (others.length > 0) {
+      labels.push('Others');
+      values.push(others.reduce((s, d) => s + d.revenue, 0));
+    }
+  }
+
+  const colors = [
+    '#ff6b35', '#20c997', '#0dcaf0', '#6f42c1', '#fd7e14',
+    '#d63384', '#198754', '#0d6efd', '#ffc107', '#dc3545',
+    '#8892a4'
+  ];
+
+  dishPieChart = new Chart(ctx, {
+    type: 'pie',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: values,
+        backgroundColor: colors.slice(0, labels.length),
+        borderColor: 'rgba(0,0,0,0.2)',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: { color: '#8892a4', font: { size: 12 }, padding: 12 }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              const total = context.dataset.data.reduce((a, b) => a + b, 0);
+              const pct = ((context.parsed / total) * 100).toFixed(1);
+              if (dishPieMode === 'revenue') {
+                return `${context.label}: ₹${context.parsed.toFixed(0)} (${pct}%)`;
+              }
+              return `${context.label}: ${context.parsed} sold (${pct}%)`;
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+// ── Assistance Requests ─────────────────────────────────
+async function loadAssistance() {
+  const data = await apiFetch('/api/restaurant/assistance', true);
+  const container = document.getElementById('assistance-list');
+  if (!container) return;
+
+  if (!Array.isArray(data) || data.length === 0) {
+    container.innerHTML = '<div class="text-center py-4" style="color:var(--text-muted)">No assistance requests right now. 🎉</div>';
+    return;
+  }
+
+  const reqLabels = { waiter: '🙋 Call Waiter', water: '💧 Water', bill: '🧾 Bill', cleanup: '🧹 Cleanup' };
+
+  container.innerHTML = data.map(r => {
+    const time = new Date(r.created_at).toLocaleString();
+    const isPending = r.status === 'pending';
+    return `
+    <div class="fc-card p-3 mb-2" style="border-left: 3px solid ${isPending ? 'var(--primary)' : '#20c997'};">
+      <div class="d-flex justify-content-between align-items-center">
+        <div>
+          <div style="font-weight:700; font-size:0.95rem;">
+            <span class="badge ${isPending ? 'bg-warning text-dark' : 'bg-success'}" style="font-size:0.75rem; margin-right:0.5rem;">
+              ${isPending ? 'Pending' : 'Resolved'}
+            </span>
+            ${reqLabels[r.request_type] || r.request_type}
+          </div>
+          <div style="font-size:0.85rem; color:var(--text-muted); margin-top:0.3rem;">
+            <i class="bi bi-geo-alt-fill" style="color:var(--primary)"></i> Table ${r.table_number}
+            <span style="margin-left:1rem;"><i class="bi bi-clock"></i> ${time}</span>
+          </div>
+        </div>
+        ${isPending ? `<button class="btn-primary-custom" style="padding:0.4rem 1rem; font-size:0.85rem;" onclick="resolveAssistance('${r._id}')">
+          <i class="bi bi-check-circle"></i> Resolve
+        </button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function resolveAssistance(requestId) {
+  const res = await apiPut(`/api/restaurant/assistance/${requestId}/resolve`, {});
+  if (res.message) {
+    showToast('Assistance request resolved ✅', 'success');
+    loadAssistance();
+  } else {
+    showToast(res.error || 'Failed to resolve', 'error');
+  }
+}
+
 // ── Orders ──────────────────────────────────────────────
 let previousOrderCount = null;
 let currentOrderView = 'table'; // 'table' or 'kanban'
@@ -111,6 +245,8 @@ async function loadOrders() {
     const isDineIn = o.order_type === 'dine-in' || o.table_number;
     const isServiceReq = o.order_type === 'service-request';
 
+    const isOffline = o.order_type === 'offline';
+
     // Build table/type column
     let tableCol;
     if (isServiceReq) {
@@ -119,6 +255,10 @@ async function loadOrders() {
         <i class="bi bi-bell-fill"></i> ${reqLabels[o.request_type] || 'Service'}
       </div>
       ${o.table_number ? `<div class="table-num-badge mt-1">Table ${o.table_number}</div>` : ''}`;
+    } else if (isOffline) {
+      tableCol = `<div class="table-badge-order" style="background:var(--primary);color:#fff">
+        <i class="bi bi-shop"></i> POS (Offline)
+      </div>`;
     } else if (isDineIn) {
       tableCol = `<div class="table-badge-order dine-in">
         <i class="bi bi-geo-alt-fill"></i> Table ${o.table_number}
@@ -163,10 +303,12 @@ async function loadOrders() {
         const isDineIn = o.order_type === 'dine-in' || o.table_number;
         const isServiceReq = o.order_type === 'service-request';
         
-        let header = isServiceReq ? '🙋 Service' : (isDineIn ? `🪑 Table ${o.table_number}` : '🚚 Delivery');
+        const isOffline = o.order_type === 'offline';
+        
+        let header = isServiceReq ? '🙋 Service' : (isOffline ? '🧑‍🍳 POS (Offline)' : (isDineIn ? `🪑 Table ${o.table_number}` : '🚚 Delivery'));
         let actions = buildOrderActions(o);
         
-        return `<div class="fc-card p-2 shadow-sm mb-2" style="border-left: 3px solid ${isDineIn?'var(--primary)':'var(--text-muted)'}; background: var(--surface)">
+        return `<div class="fc-card p-2 shadow-sm mb-2" style="border-left: 3px solid ${(isDineIn||isOffline)?'var(--primary)':'var(--text-muted)'}; background: var(--surface)">
             <div class="d-flex justify-content-between align-items-center mb-1">
                 <span class="badge ${isDineIn ? 'bg-primary' : 'bg-secondary'}">${header}</span>
                 <small style="color:var(--text-muted)">${date}</small>
@@ -213,8 +355,9 @@ function buildOrderActions(o) {
   // If order is ready or delivered, show billing options
   if (o.status === 'ready' || o.status === 'delivered') {
     if (o.order_type !== 'service-request') {
+      const waNumber = o.customer_mobile ? (o.customer_mobile.startsWith('+') ? o.customer_mobile.replace('+', '') : '91' + o.customer_mobile) : '';
       actions += `<br>` + billBtn('bi-printer', 'Print', `window.open('/bill/${o._id}', '_blank')`);
-      actions += billBtn('bi-whatsapp', 'WhatsApp', `window.open('https://wa.me/?text=${wpMsg}', '_blank')`);
+      actions += billBtn('bi-whatsapp', 'WhatsApp', `window.open('https://wa.me/${waNumber}?text=${wpMsg}', '_blank')`);
     }
   }
   return actions;
@@ -435,6 +578,11 @@ async function saveOffer() {
   }
 }
 
+function setQuickOffer(text, pct) {
+  document.getElementById('offer-input').value = text;
+  document.getElementById('discount-pct-input').value = pct;
+}
+
 
 // ══════════════════════════════════════════════════════════
 // TABLES & QR CODE MANAGEMENT
@@ -644,7 +792,154 @@ async function sendAIQuery(query) {
     messages.scrollTop = messages.scrollHeight;
 }
 
+// ══════════════════════════════════════════════════════════
+// OFFLINE ORDER / POS SYSTEM
+// ══════════════════════════════════════════════════════════
+
+let offlineOrderCart = [];
+
+async function openOfflineOrderModal() {
+    // Reload menu to populate dropdown
+    await loadMenu();
+    
+    const select = document.getElementById('offline-menu-select');
+    if (!select) return;
+    
+    select.innerHTML = '<option value="">-- Select an item --</option>' + 
+        menuItems.map(item => `<option value="${item._id}">${item.name} (₹${item.price})</option>`).join('');
+    
+    offlineOrderCart = [];
+    document.getElementById('offline-mobile').value = '';
+    document.getElementById('offline-discount').value = '0';
+    renderOfflineOrder();
+    
+    new bootstrap.Modal(document.getElementById('offlineOrderModal')).show();
+}
+
+function addOfflineItem() {
+    const select = document.getElementById('offline-menu-select');
+    const itemId = select.value;
+    if (!itemId) return;
+    
+    const item = menuItems.find(i => i._id === itemId);
+    if (!item) return;
+    
+    const existing = offlineOrderCart.find(i => i.item_id === itemId);
+    if (existing) {
+        existing.quantity += 1;
+    } else {
+        offlineOrderCart.push({
+            item_id: item._id,
+            name: item.name,
+            price: item.price,
+            quantity: 1
+        });
+    }
+    
+    select.value = ''; // Reset select
+    renderOfflineOrder();
+}
+
+function updateOfflineItemQty(index, qty) {
+    qty = parseInt(qty);
+    if (qty <= 0) {
+        offlineOrderCart.splice(index, 1);
+    } else {
+        offlineOrderCart[index].quantity = qty;
+    }
+    renderOfflineOrder();
+}
+
+function renderOfflineOrder() {
+    const tbody = document.getElementById('offline-order-items');
+    
+    if (offlineOrderCart.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No items added yet.</td></tr>';
+        document.getElementById('offline-subtotal').textContent = '₹0';
+        document.getElementById('offline-discount-display').textContent = '-₹0';
+        document.getElementById('offline-total').textContent = '₹0';
+        return;
+    }
+    
+    let subtotal = 0;
+    
+    tbody.innerHTML = offlineOrderCart.map((item, i) => {
+        const itemTotal = item.price * item.quantity;
+        subtotal += itemTotal;
+        return `
+            <tr>
+                <td style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${item.name}">${item.name}</td>
+                <td>₹${item.price}</td>
+                <td>
+                    <div class="d-flex align-items-center">
+                        <button class="btn btn-sm btn-outline-secondary p-0" style="width:20px;height:20px;line-height:1" onclick="updateOfflineItemQty(${i}, ${item.quantity - 1})">-</button>
+                        <span class="mx-2" style="font-size:0.85rem">${item.quantity}</span>
+                        <button class="btn btn-sm btn-outline-secondary p-0" style="width:20px;height:20px;line-height:1" onclick="updateOfflineItemQty(${i}, ${item.quantity + 1})">+</button>
+                    </div>
+                </td>
+                <td style="font-weight:bold">₹${itemTotal}</td>
+                <td>
+                    <button class="btn btn-sm text-danger p-0" onclick="updateOfflineItemQty(${i}, 0)"><i class="bi bi-trash"></i></button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+    
+    let discount = parseFloat(document.getElementById('offline-discount').value) || 0;
+    if (discount > subtotal) {
+        discount = subtotal;
+        document.getElementById('offline-discount').value = discount;
+    }
+    
+    const total = subtotal - discount;
+    
+    document.getElementById('offline-subtotal').textContent = `₹${subtotal}`;
+    document.getElementById('offline-discount-display').textContent = `-₹${discount}`;
+    document.getElementById('offline-total').textContent = `₹${total}`;
+}
+
+async function submitOfflineOrder() {
+    if (offlineOrderCart.length === 0) {
+        showToast('Cart is empty', 'error');
+        return;
+    }
+    
+    const btn = document.getElementById('offline-submit-btn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Processing...';
+    btn.disabled = true;
+    
+    const mobile = document.getElementById('offline-mobile').value.trim();
+    const discount = parseFloat(document.getElementById('offline-discount').value) || 0;
+    const printReceipt = document.getElementById('offline-print-receipt').checked;
+    
+    const payload = {
+        items: offlineOrderCart,
+        mobile_number: mobile,
+        discount: discount
+    };
+    
+    const res = await apiPost('/api/restaurant/offline_order', payload, true);
+    
+    if (res.message) {
+        showToast('Offline order created successfully!', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('offlineOrderModal')).hide();
+        loadOrders();
+        loadDashboard();
+        
+        if (printReceipt && res.order_id) {
+            window.open(`/bill/${res.order_id}`, '_blank');
+        }
+    } else {
+        showToast(res.error || 'Failed to create order', 'error');
+    }
+    
+    btn.innerHTML = originalText;
+    btn.disabled = false;
+}
+
 function quickAIQuery(query) {
     document.getElementById('ai-chat-input').value = query;
     sendAIQuery();
 }
+

@@ -121,7 +121,7 @@
                             ${i.name}
                             ${i.options ? `<div class="item-options">${i.options}</div>` : ''}
                         </td>
-                        <td class="price">${(i.price * i.quantity).toFixed(2)}</td>
+                        <td class="price">₹${(i.price * i.quantity).toFixed(2)}</td>
                     </tr>
                 `).join('');
 
@@ -159,15 +159,35 @@
                     <div class="totals">
                         <div class="totals-row">
                             <span>Subtotal</span>
-                            <span>${order.total_price.toFixed(2)}</span>
+                            <span>₹${(order.subtotal || order.total_price).toFixed(2)}</span>
                         </div>
+                        ${order.restaurant_discount > 0 ? `
+                        <div class="totals-row" style="color: #ff6b35;">
+                            <span>Restaurant Offer</span>
+                            <span>-₹${order.restaurant_discount.toFixed(2)}</span>
+                        </div>` : ''}
+                        ${order.coupon_discount > 0 ? `
+                        <div class="totals-row" style="color: #ff6b35;">
+                            <span>Coupon (${order.coupon_code})</span>
+                            <span>-₹${order.coupon_discount.toFixed(2)}</span>
+                        </div>` : ''}
+                        ${order.discount_amount > 0 ? `
+                        <div class="totals-row" style="color: #ff6b35;">
+                            <span>Discount</span>
+                            <span>-₹${order.discount_amount.toFixed(2)}</span>
+                        </div>` : ''}
+                        ${order.points_discount > 0 ? `
+                        <div class="totals-row" style="color: #ff6b35;">
+                            <span>Points Redeemed (${order.points_used})</span>
+                            <span>-₹${order.points_discount.toFixed(2)}</span>
+                        </div>` : ''}
                         <div class="totals-row">
                             <span>Tax (Included)</span>
-                            <span>0.00</span>
+                            <span>₹0.00</span>
                         </div>
                         <div class="totals-row grand-total">
                             <span>Total (INR)</span>
-                            <span>${order.total_price.toFixed(2)}</span>
+                            <span>₹${order.total_price.toFixed(2)}</span>
                         </div>
                     </div>
 

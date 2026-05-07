@@ -19,11 +19,12 @@
 
     <nav class="navbar navbar-expand-lg">
         <div class="container-fluid px-4">
-            <a class="navbar-brand" href="/">🍽️ Food<span>Court</span> <small
-                    style="font-size:.65rem;color:var(--text-muted);-webkit-text-fill-color:var(--text-muted)">Restaurant
-                    Panel</small></a>
+            <a class="navbar-brand" href="/restaurant_dashboard.html">🧑‍🍳 Restaurant<span>Panel</span></a>
             <div class="ms-auto d-flex align-items-center gap-3">
                 <span id="rest-name-nav" style="color:var(--text-muted);font-size:.9rem"></span>
+                <a href="/" class="btn-outline-custom" style="padding:.4rem 1rem;font-size:.85rem;text-decoration:none" target="_blank">
+                    <i class="bi bi-shop"></i> Customer View
+                </a>
                 <div class="theme-switch-wrapper">
                     <label class="theme-switch" for="checkbox-theme-restaurant">
                         <input type="checkbox" id="checkbox-theme-restaurant" />
@@ -47,6 +48,10 @@
                 <div class="sidebar">
                     <a class="sidebar-link active" href="#" onclick="showSection('orders')">
                         <i class="bi bi-bag-check"></i> Orders
+                    </a>
+                    <a class="sidebar-link" href="#" onclick="showSection('assistance')">
+                        <i class="bi bi-bell"></i> Assistance
+                        <span id="assistance-badge" class="badge bg-danger ms-1" style="display:none;font-size:0.65rem;">!</span>
                     </a>
                     <a class="sidebar-link" href="#" onclick="showSection('menu')">
                         <i class="bi bi-menu-button-wide"></i> Menu
@@ -85,7 +90,7 @@
                         </div>
                         <div class="col-6 col-lg-3">
                             <div class="stat-card">
-                                <div class="stat-icon gold"><i class="bi bi-currency-dollar"></i></div>
+                                <div class="stat-icon gold"><i class="bi bi-currency-rupee"></i></div>
                                 <div>
                                     <div class="stat-value" id="s-revenue">—</div>
                                     <div class="stat-label">Revenue</div>
@@ -121,12 +126,36 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Top Selling Items Pie Chart -->
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <div class="fc-card p-4">
+                                <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                                    <h5 style="color:var(--text-primary);font-weight:700;margin:0">🍕 Top Selling Items</h5>
+                                    <div class="btn-group" role="group">
+                                        <button id="pie-mode-qty" class="btn btn-outline-custom active" style="padding:.3rem .8rem;font-size:.82rem" onclick="setDishPieMode('quantity')">📦 By Quantity</button>
+                                        <button id="pie-mode-rev" class="btn btn-outline-custom" style="padding:.3rem .8rem;font-size:.82rem" onclick="setDishPieMode('revenue')">₹ By Revenue</button>
+                                    </div>
+                                </div>
+                                <div style="position:relative;max-height:320px">
+                                    <canvas id="dishPieChart"></canvas>
+                                </div>
+                                <p class="text-center mt-2" style="color:var(--text-muted);font-size:0.8rem">Top 10 items shown individually · remaining grouped as <em>Others</em></p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Orders section -->
                 <div id="section-orders">
                     <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-                        <h2 class="section-title mb-0">Incoming Orders</h2>
+                        <div class="d-flex align-items-center gap-3">
+                            <h2 class="section-title mb-0">Incoming Orders</h2>
+                            <button class="btn-primary-custom" onclick="openOfflineOrderModal()" style="padding:.4rem 1rem;font-size:.85rem">
+                                <i class="bi bi-plus-circle"></i> New Offline Order
+                            </button>
+                        </div>
                         <div class="d-flex gap-2 flex-wrap">
                             <select class="fc-input" id="status-filter" style="width:auto;padding:.4rem .9rem"
                                 onchange="loadOrders()">
@@ -204,6 +233,22 @@
                     </div>
                 </div>
 
+                <!-- Assistance section -->
+                <div id="section-assistance" style="display:none">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <h2 class="section-title mb-0">🔔 Customer Assistance</h2>
+                            <p class="section-subtitle mb-0">Service requests from tables</p>
+                        </div>
+                        <button class="btn-outline-custom" style="padding:.4rem 1rem;font-size:.85rem" onclick="loadAssistance()">
+                            <i class="bi bi-arrow-clockwise"></i> Refresh
+                        </button>
+                    </div>
+                    <div id="assistance-list">
+                        <div class="text-center py-4" style="color:var(--text-muted)">Loading...</div>
+                    </div>
+                </div>
+
                 <!-- Menu section (hidden by default) -->
                 <div id="section-menu" style="display:none">
                     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -256,13 +301,22 @@
                     <p class="section-subtitle mb-4">Set a promotional offer to attract more customers</p>
                     <div class="fc-card p-4 mx-auto" style="max-width:500px">
                         <div class="mb-3">
-                            <label class="fc-label">Current Offer</label>
+                            <label class="fc-label">Current Offer Text</label>
                             <input type="text" id="offer-input" class="fc-input"
                                 placeholder="e.g. 20% OFF on all pizzas!">
                         </div>
                         <div class="mb-3">
                             <label class="fc-label">Discount Percentage (%)</label>
                             <input type="number" id="discount-pct-input" class="fc-input" placeholder="e.g. 10" min="0" max="100">
+                        </div>
+                        <div class="mb-3">
+                            <label class="fc-label">Quick Suggestions</label>
+                            <div class="d-flex flex-wrap gap-2">
+                                <button class="pill" onclick="setQuickOffer('Get 10% OFF your entire meal!', 10)">10% OFF</button>
+                                <button class="pill" onclick="setQuickOffer('Flat 20% OFF — Limited Time', 20)">20% OFF</button>
+                                <button class="pill" onclick="setQuickOffer('Super Saver: 30% OFF', 30)">30% OFF</button>
+                                <button class="pill" onclick="setQuickOffer('Free Delivery + 5% OFF', 5)">Free Delivery + 5%</button>
+                            </div>
                         </div>
                         <div class="mb-3">
                             <div class="form-check form-switch">
@@ -299,7 +353,7 @@
                                 required>
                         </div>
                         <div class="mb-3">
-                            <label class="fc-label">Price ($)</label>
+                            <label class="fc-label">Price (₹)</label>
                             <input type="number" class="fc-input" id="item-price" placeholder="0.00" step="0.01"
                                 min="0" required>
                         </div>
@@ -321,6 +375,75 @@
                     <button class="btn-primary-custom" id="save-item-btn" onclick="saveMenuItem()">
                         <i class="bi bi-check-lg"></i> Save
                     </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Offline Order Modal -->
+    <div class="modal fade" id="offlineOrderModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)">
+                <div class="modal-header" style="border-color:var(--border)">
+                    <h5 class="modal-title">Create Offline Order / POS</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-7 border-end" style="border-color:var(--border)!important">
+                            <div class="mb-3">
+                                <label class="fc-label">Select Items</label>
+                                <select class="fc-input mb-2" id="offline-menu-select"></select>
+                                <button class="btn-outline-custom w-100" onclick="addOfflineItem()"><i class="bi bi-plus"></i> Add Item</button>
+                            </div>
+                            <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
+                                <table class="fc-table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Item</th>
+                                            <th>Price</th>
+                                            <th style="width:100px">Qty</th>
+                                            <th>Total</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="offline-order-items">
+                                        <tr><td colspan="5" class="text-center text-muted">No items added yet.</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="col-md-5">
+                            <div class="mb-3">
+                                <label class="fc-label">Customer Mobile (Optional)</label>
+                                <input type="text" class="fc-input" id="offline-mobile" placeholder="e.g. 9876543210">
+                            </div>
+                            <div class="mb-3">
+                                <label class="fc-label">Discount Amount (₹) (Optional)</label>
+                                <input type="number" class="fc-input" id="offline-discount" value="0" min="0" onchange="renderOfflineOrder()">
+                            </div>
+                            <hr style="border-color:var(--border)">
+                            <div class="d-flex justify-content-between mb-2">
+                                <span>Subtotal</span>
+                                <strong id="offline-subtotal">₹0</strong>
+                            </div>
+                            <div class="d-flex justify-content-between mb-2 text-success">
+                                <span>Discount</span>
+                                <strong id="offline-discount-display">-₹0</strong>
+                            </div>
+                            <div class="d-flex justify-content-between mb-3" style="font-size:1.2rem;font-weight:bold;color:var(--primary)">
+                                <span>Total</span>
+                                <span id="offline-total">₹0</span>
+                            </div>
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="offline-print-receipt" checked>
+                                <label class="form-check-label" for="offline-print-receipt">Print Receipt automatically</label>
+                            </div>
+                            <button class="btn-primary-custom w-100 py-2" id="offline-submit-btn" onclick="submitOfflineOrder()">
+                                <i class="bi bi-receipt"></i> Create & Mark Delivered
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -372,7 +495,7 @@
         function logout() { localStorage.clear(); window.location.href = '/restaurant_auth.html'; }
 
         function showSection(name) {
-            const sections = ['orders', 'menu', 'stats', 'reviews', 'offers', 'tables'];
+            const sections = ['orders', 'assistance', 'menu', 'stats', 'reviews', 'offers', 'tables'];
             sections.forEach(s => {
                 const el = document.getElementById('section-' + s);
                 if (el) el.style.display = s === name ? '' : 'none';
@@ -381,9 +504,10 @@
                 el.classList.toggle('active', sections[i] === name);
             });
             if (name === 'menu') loadMenu();
-            if (name === 'stats') { loadDashboard(); loadRevenueGraph(); }
+            if (name === 'stats') { loadDashboard(); loadRevenueGraph(); loadTopDishesChart(); }
             if (name === 'reviews') loadReviews();
             if (name === 'tables') loadTables();
+            if (name === 'assistance') loadAssistance();
         }
 
         loadDashboard();
