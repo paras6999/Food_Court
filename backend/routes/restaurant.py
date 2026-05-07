@@ -8,7 +8,7 @@ from backend.utils.upload import save_image
 
 restaurant_bp = Blueprint("restaurant", __name__)
 
-VALID_STATUSES = ["pending", "accepted", "rejected", "preparing", "ready", "delivered"]
+VALID_STATUSES = ["pending", "accepted", "rejected", "preparing", "ready", "delivered", "paid"]
 
 
 def _item_to_dict(i):
@@ -69,7 +69,7 @@ def revenue_data():
     rest_id = ObjectId(get_jwt_identity())
     
     # Get orders from last 7 days
-    sevendays_ago = datetime.utcnow() - timedelta(days=6)
+    sevendays_ago = datetime.utcnow() + timedelta(hours=5, minutes=30) - timedelta(days=6)
     sevendays_ago = sevendays_ago.replace(hour=0, minute=0, second=0, microsecond=0)
     
     orders = list(orders_col.find({
@@ -81,7 +81,7 @@ def revenue_data():
     # Group by date string (YYYY-MM-DD)
     daily_revenue = {}
     for i in range(7):
-        d = (datetime.utcnow() - timedelta(days=i)).strftime("%Y-%m-%d")
+        d = (datetime.utcnow() + timedelta(hours=5, minutes=30) - timedelta(days=i)).strftime("%Y-%m-%d")
         daily_revenue[d] = 0
 
     for o in orders:
@@ -172,7 +172,8 @@ def add_menu_item():
         "name": name,
         "price": float(price),
         "image": image_url,
-        "available": available
+        "available": available,
+        "addons": request.form.get("addons", "").strip()
     }).inserted_id
 
     return jsonify({"message": "Menu item added", "item_id": str(item_id)}), 201
@@ -200,6 +201,8 @@ def update_menu_item(item_id):
             updates["price"] = float(request.form.get("price"))
         if request.form.get("available") is not None:
             updates["available"] = request.form.get("available").lower() == "true"
+        if "addons" in request.form:
+            updates["addons"] = request.form.get("addons").strip()
         if "image" in request.files:
             url = save_image(request.files["image"], "menu")
             if url:
@@ -212,6 +215,8 @@ def update_menu_item(item_id):
             updates["price"] = float(data["price"])
         if "available" in data:
             updates["available"] = bool(data["available"])
+        if "addons" in data:
+            updates["addons"] = str(data["addons"]).strip()
 
     if not updates:
         return jsonify({"error": "No fields to update"}), 400
@@ -284,7 +289,7 @@ def resolve_assistance(request_id):
 
     result = orders_col.update_one(
         {"_id": oid, "restaurant_id": rest_id, "order_type": "service-request"},
-        {"$set": {"status": "resolved", "resolved_at": datetime.utcnow()}}
+        {"$set": {"status": "resolved", "resolved_at": datetime.utcnow() + timedelta(hours=5, minutes=30)}}
     )
     if result.matched_count == 0:
         return jsonify({"error": "Request not found"}), 404
@@ -308,7 +313,7 @@ def update_order_status(order_id):
 
     result = orders_col.update_one(
         {"_id": oid, "restaurant_id": rest_id},
-        {"$set": {"status": new_status, "updated_at": datetime.utcnow()}}
+        {"$set": {"status": new_status, "updated_at": datetime.utcnow() + timedelta(hours=5, minutes=30)}}
     )
     if result.matched_count == 0:
         return jsonify({"error": "Order not found or unauthorized"}), 404
@@ -412,8 +417,8 @@ def create_coupon():
         "min_order": min_order,
         "first_order_only": first_order_only,
         "enabled": enabled,
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow()
+        "created_at": datetime.utcnow() + timedelta(hours=5, minutes=30),
+        "updated_at": datetime.utcnow() + timedelta(hours=5, minutes=30)
     }
     
     result = coupons_col.insert_one(coupon_doc)
@@ -457,7 +462,7 @@ def update_coupon(coupon_id):
     if not updates:
         return jsonify({"error": "No fields to update"}), 400
     
-    updates["updated_at"] = datetime.utcnow()
+    updates["updated_at"] = datetime.utcnow() + timedelta(hours=5, minutes=30)
     
     coupons_col.update_one({"_id": cid}, {"$set": updates})
     return jsonify({"message": "Coupon updated successfully"}), 200
@@ -511,7 +516,7 @@ def create_tables():
             "restaurant_id": rest_id,
             "table_number": t_num,
             "status": "available",
-            "created_at": datetime.utcnow()
+            "created_at": datetime.utcnow() + timedelta(hours=5, minutes=30)
         })
         created.append(t_num)
 
@@ -534,7 +539,7 @@ def list_tables():
         active_orders = orders_col.count_documents({
             "restaurant_id": rest_id,
             "table_number": t["table_number"],
-            "status": {"$in": ["pending", "accepted", "preparing", "ready"]}
+            "status": {"$in": ["pending", "accepted", "preparing", "ready", "delivered"]}
         })
         result.append({
             "_id": str(t["_id"]),
@@ -555,6 +560,69 @@ def delete_table(table_number):
     if result.deleted_count == 0:
         return jsonify({"error": "Table not found"}), 404
     return jsonify({"message": f"Table {table_number} deleted"}), 200
+
+# ── Get Table Bill ──────────────────────────────────────────────────────────────
+@restaurant_bp.route("/api/restaurant/table/<int:table_number>/bill", methods=["GET"])
+@role_required("restaurant")
+def get_table_bill(table_number):
+    rest_id = ObjectId(get_jwt_identity())
+    
+    # Find all active orders for this table (not rejected, not paid)
+    # They can be pending, accepted, preparing, ready, delivered
+    # Support both int and string for table_number in query to be safe
+    orders = list(orders_col.find({
+        "restaurant_id": rest_id,
+        "$or": [
+            {"table_number": table_number},
+            {"table_number": str(table_number)}
+        ],
+        "status": {"$nin": ["rejected", "cancelled", "paid"]}
+    }))
+    
+    if not orders:
+        return jsonify({"error": "No active orders found for this table"}), 404
+        
+    items = []
+    total_price = 0
+    total_discount = 0
+    
+    for o in orders:
+        total_price += o.get("total_price", 0)
+        total_discount += o.get("restaurant_discount", 0) + o.get("coupon_discount", 0)
+        for i in o.get("items", []):
+            items.append({
+                "name": i.get("name"),
+                "quantity": i.get("quantity"),
+                "price": i.get("price")
+            })
+            
+    return jsonify({
+        "table_number": table_number,
+        "items": items,
+        "total_price": total_price,
+        "total_discount": total_discount,
+        "order_ids": [str(o["_id"]) for o in orders]
+    }), 200
+
+# ── Mark Table as Paid (Clear Table) ────────────────────────────────────────────
+@restaurant_bp.route("/api/restaurant/table/<int:table_number>/clear", methods=["POST"])
+@role_required("restaurant")
+def clear_table(table_number):
+    rest_id = ObjectId(get_jwt_identity())
+    
+    result = orders_col.update_many(
+        {
+            "restaurant_id": rest_id,
+            "$or": [
+                {"table_number": table_number},
+                {"table_number": str(table_number)}
+            ],
+            "status": {"$nin": ["rejected", "cancelled", "paid"]}
+        },
+        {"$set": {"status": "paid", "updated_at": datetime.utcnow() + timedelta(hours=5, minutes=30)}}
+    )
+    
+    return jsonify({"message": f"Table {table_number} cleared and orders marked as paid", "modified_count": result.modified_count}), 200
 
 # ══════════════════════════════════════════════════════════════════════════════
 # AI ANALYST
@@ -742,8 +810,8 @@ def create_offline_order():
             "address": "Offline Order (Walk-in)",
             "status": "delivered",  # Offline orders are immediately fulfilled
             "order_type": "offline",
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
+            "created_at": datetime.utcnow() + timedelta(hours=5, minutes=30),
+            "updated_at": datetime.utcnow() + timedelta(hours=5, minutes=30)
         }
         
         order_id = orders_col.insert_one(order_doc).inserted_id

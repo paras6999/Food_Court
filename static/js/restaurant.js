@@ -72,6 +72,7 @@ async function loadTopDishesChart() {
   if (!data || data.error || !Array.isArray(data)) return;
   allDishData = data;
   renderDishPieChart();
+  renderDishTable();
 }
 
 function setDishPieMode(mode) {
@@ -79,6 +80,36 @@ function setDishPieMode(mode) {
   document.getElementById('pie-mode-qty').classList.toggle('active', mode === 'quantity');
   document.getElementById('pie-mode-rev').classList.toggle('active', mode === 'revenue');
   renderDishPieChart();
+  renderDishTable();
+}
+
+function renderDishTable() {
+  const tbody = document.getElementById('top-items-table-body');
+  if (!tbody || allDishData.length === 0) {
+    if(tbody) tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No items sold yet.</td></tr>';
+    return;
+  }
+  
+  // Sort based on current mode
+  const sortedData = [...allDishData].sort((a, b) => {
+    if (dishPieMode === 'quantity') {
+      return b.quantity_sold - a.quantity_sold;
+    } else {
+      return b.revenue - a.revenue;
+    }
+  });
+
+  tbody.innerHTML = sortedData.map((d, index) => {
+    const isTop = index < 3;
+    const rankBadge = isTop ? `<span class="badge" style="background:var(--primary);margin-right:8px;">#${index+1}</span>` : `<span style="color:var(--text-muted);font-size:0.8rem;margin-right:12px;">#${index+1}</span>`;
+    return `
+      <tr>
+        <td style="font-weight:${isTop ? '600' : '400'};">${rankBadge}${d.name}</td>
+        <td class="text-end">${d.quantity_sold}</td>
+        <td class="text-end text-success fw-bold">₹${d.revenue.toFixed(2)}</td>
+      </tr>
+    `;
+  }).join('');
 }
 
 function renderDishPieChart() {
@@ -125,10 +156,11 @@ function renderDishPieChart() {
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       plugins: {
         legend: {
-          position: 'right',
-          labels: { color: '#8892a4', font: { size: 12 }, padding: 12 }
+          position: 'bottom',
+          labels: { boxWidth: 12, font: { size: 10 } }
         },
         tooltip: {
           callbacks: {
@@ -430,6 +462,8 @@ function openAddModal() {
   document.getElementById('item-available').checked = true;
   const fileInput = document.getElementById('item-image');
   if (fileInput) fileInput.value = '';
+  const addonsEl = document.getElementById('item-addons');
+  if (addonsEl) addonsEl.value = '';
   menuModal = new bootstrap.Modal(document.getElementById('menuModal'));
   menuModal.show();
 }
@@ -442,6 +476,8 @@ function openEditModal(itemId) {
   document.getElementById('item-name').value = item.name;
   document.getElementById('item-price').value = item.price;
   document.getElementById('item-available').checked = item.available;
+  const addonsEl = document.getElementById('item-addons');
+  if (addonsEl) addonsEl.value = item.addons || '';
   menuModal = new bootstrap.Modal(document.getElementById('menuModal'));
   menuModal.show();
 }
@@ -452,6 +488,7 @@ async function saveMenuItem() {
   const price = document.getElementById('item-price').value;
   const available = document.getElementById('item-available').checked;
   const imageFile = document.getElementById('item-image')?.files[0];
+  const addons = document.getElementById('item-addons')?.value.trim() || '';
   const btn = document.getElementById('save-item-btn');
 
   if (!name || !price) { showToast('Name and price are required', 'error'); return; }
@@ -464,6 +501,7 @@ async function saveMenuItem() {
   fd.append('name', name);
   fd.append('price', price);
   fd.append('available', available);
+  fd.append('addons', addons);
   if (imageFile) fd.append('image', imageFile);
 
   const url = itemId ? `/api/menu/update/${itemId}` : '/api/menu/add';
@@ -641,15 +679,16 @@ async function loadTables() {
             </span>
           </div>
           <div class="qr-code-container" id="qr-${t.table_number}"></div>
-          <div class="qr-table-actions">
+          <div class="qr-table-actions d-flex flex-wrap gap-2">
             <button class="btn-outline-custom" style="padding:.3rem .6rem;font-size:.75rem;flex:1"
               onclick="copyQrUrl('${qrUrl}')">
               <i class="bi bi-clipboard"></i> Copy URL
             </button>
-            <button class="btn-outline-custom" style="padding:.3rem .6rem;font-size:.75rem;border-color:var(--accent);color:var(--accent)"
+            <button class="btn-outline-custom" style="padding:.3rem .6rem;font-size:.75rem;flex:1;border-color:var(--accent);color:var(--accent)"
               onclick="deleteTable(${t.table_number})">
               <i class="bi bi-trash"></i>
             </button>
+            ${t.status === 'occupied' ? `<button class="btn-outline-custom w-100 mt-2" style="padding:.3rem .6rem;font-size:.75rem;border-color:#20c997;color:#20c997" onclick="generateTableBill(${t.table_number})"><i class="bi bi-receipt"></i> Generate Final Bill</button>` : ''}
           </div>
         </div>
       </div>
@@ -703,6 +742,64 @@ async function deleteTable(tableNumber) {
   } else {
     showToast(res.error || 'Delete failed', 'error');
   }
+}
+
+let currentBillTable = null;
+
+async function generateTableBill(tableNumber) {
+    const res = await apiFetch(`/api/restaurant/table/${tableNumber}/bill`, true);
+    if (res.error) {
+        showToast(res.error, 'error');
+        return;
+    }
+
+    currentBillTable = tableNumber;
+    document.getElementById('bill-table-num').textContent = tableNumber;
+    
+    const tbody = document.getElementById('table-bill-items');
+    if (!res.items || res.items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">No items</td></tr>';
+    } else {
+        tbody.innerHTML = res.items.map(i => `
+            <tr>
+                <td>${i.name}</td>
+                <td>${i.quantity}</td>
+                <td class="text-end">₹${i.price * i.quantity}</td>
+            </tr>
+        `).join('');
+    }
+
+    document.getElementById('table-bill-discount').textContent = `-₹${res.total_discount.toFixed(2)}`;
+    document.getElementById('table-bill-total').textContent = `₹${(res.total_price - res.total_discount).toFixed(2)}`;
+    
+    const btn = document.getElementById('table-bill-pay-btn');
+    btn.onclick = () => clearTable(tableNumber);
+    
+    const modal = new bootstrap.Modal(document.getElementById('tableBillModal'));
+    modal.show();
+}
+
+async function clearTable(tableNumber) {
+    if (!confirm(`Are you sure you want to mark Table ${tableNumber} as paid and clear it?`)) return;
+    
+    const btn = document.getElementById('table-bill-pay-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Processing...';
+    
+    const res = await apiPost(`/api/restaurant/table/${tableNumber}/clear`, {}, true);
+    if (res.message) {
+        showToast(`Table ${tableNumber} cleared successfully! 🧾`, 'success');
+        const modal = bootstrap.Modal.getInstance(document.getElementById('tableBillModal'));
+        if (modal) modal.hide();
+        loadTables();
+        loadOrders();
+        loadDashboard();
+    } else {
+        showToast(res.error || 'Failed to clear table', 'error');
+    }
+    
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-check-circle"></i> Mark as Paid & Clear Table';
 }
 
 // ══════════════════════════════════════════════════════════

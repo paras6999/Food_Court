@@ -200,14 +200,17 @@ function initNavbar() {
   const name  = getName();
 
   if (token && role === 'customer') {
-    const navUser = document.getElementById('nav-user');
-    const navLogin = document.getElementById('nav-login');
-    const navReg = document.getElementById('nav-register');
-    const navOrders = document.getElementById('nav-orders');
-    if (navUser) { navUser.style.display = ''; document.getElementById('nav-username').textContent = name; }
-    if (navLogin) navLogin.style.display = 'none';
-    if (navReg) navReg.style.display = 'none';
-    if (navOrders) navOrders.style.display = '';
+    const navUserInfo = document.getElementById('nav-user-info');
+    const navLoginItem = document.getElementById('nav-login-item');
+    const navRegisterItem = document.getElementById('nav-register-item');
+    const navOrdersItem = document.getElementById('nav-orders-item');
+    const navLogoutItem = document.getElementById('nav-logout-item');
+    
+    if (navUserInfo) { navUserInfo.style.display = ''; document.getElementById('nav-username').textContent = name; }
+    if (navLoginItem) navLoginItem.style.display = 'none';
+    if (navRegisterItem) navRegisterItem.style.display = 'none';
+    if (navOrdersItem) navOrdersItem.style.display = '';
+    if (navLogoutItem) navLogoutItem.style.display = '';
   }
 
   const logoutBtn = document.getElementById('logout-btn');
@@ -237,6 +240,12 @@ function initTheme() {
         }
         sw.addEventListener('change', toggleTheme);
     });
+
+    // Setup new button icon
+    const icon = document.querySelector('#theme-toggle-btn i');
+    if (icon) {
+        icon.className = currentTheme === 'light' ? 'bi bi-sun' : 'bi bi-moon-stars';
+    }
 }
 
 function toggleTheme(e) {
@@ -247,14 +256,55 @@ function toggleTheme(e) {
         document.body.classList.remove('light-theme');
         localStorage.setItem('fc-theme', 'dark');
     }
+    
+    const icon = document.querySelector('#theme-toggle-btn i');
+    if (icon) {
+        icon.className = e.target.checked ? 'bi bi-sun' : 'bi bi-moon-stars';
+    }
+}
+
+function toggleProfessionalTheme() {
+    const isLight = document.body.classList.contains('light-theme');
+    const icon = document.querySelector('#theme-toggle-btn i');
+    if (isLight) {
+        document.body.classList.remove('light-theme');
+        localStorage.setItem('fc-theme', 'dark');
+        if (icon) icon.className = 'bi bi-moon-stars';
+    } else {
+        document.body.classList.add('light-theme');
+        localStorage.setItem('fc-theme', 'light');
+        if (icon) icon.className = 'bi bi-sun';
+    }
 }
 
 // Ensure theme is applied right away when script loads
 initTheme();
 
 // ── Item Details Bottom Sheet ───────────────────────────
-function openItemDetails(itemId, name, price, restId, restName, image, desc, isVeg) {
+function openItemDetails(itemId, name, price, restId, restName, image, desc, isVeg, addonsStr = '') {
     let bsModal = document.getElementById('itemDetailsModal');
+    
+    // Parse addons
+    let addonsHTML = '';
+    if (addonsStr) {
+        const addonsList = addonsStr.split(',').map(a => a.trim()).filter(a => a);
+        addonsList.forEach(addon => {
+            const parts = addon.split(':');
+            if (parts.length === 2) {
+                const aName = parts[0].trim();
+                const aPrice = parseFloat(parts[1].trim());
+                if (!isNaN(aPrice)) {
+                    addonsHTML += `
+                    <label class="d-flex justify-content-between align-items-center p-2" style="background:rgba(255,255,255,0.05); border-radius:8px; cursor:pointer;">
+                        <span><input type="checkbox" class="bs-addon-cb me-2" value="${aName}" data-price="${aPrice}"> ${aName}</span>
+                        <span style="color:var(--text-muted); font-size:0.85rem;">+₹${aPrice}</span>
+                    </label>
+                    `;
+                }
+            }
+        });
+    }
+
     if (!bsModal) {
         const html = `
         <div class="offcanvas offcanvas-bottom" tabindex="-1" id="itemDetailsModal" style="height:auto; max-height:85vh; border-top-left-radius: 20px; border-top-right-radius: 20px;">
@@ -281,16 +331,11 @@ function openItemDetails(itemId, name, price, restId, restName, image, desc, isV
                     <button class="pill bs-spicy" data-val="Spicy">Spicy 🌶️🌶️🌶️</button>
                 </div>
                 
-                <h6 style="font-weight:700; margin-bottom:1rem;">Add-ons</h6>
-                <div class="d-flex flex-column gap-2 mb-4" id="bs-addons">
-                    <label class="d-flex justify-content-between align-items-center p-2" style="background:rgba(255,255,255,0.05); border-radius:8px; cursor:pointer;">
-                        <span><input type="checkbox" class="bs-addon-cb me-2" value="Extra Cheese" data-price="30"> Extra Cheese</span>
-                        <span style="color:var(--text-muted); font-size:0.85rem;">+₹30</span>
-                    </label>
-                    <label class="d-flex justify-content-between align-items-center p-2" style="background:rgba(255,255,255,0.05); border-radius:8px; cursor:pointer;">
-                        <span><input type="checkbox" class="bs-addon-cb me-2" value="Double Patty" data-price="50"> Double Patty</span>
-                        <span style="color:var(--text-muted); font-size:0.85rem;">+₹50</span>
-                    </label>
+                <div id="bs-addons-container" style="display:none">
+                    <h6 style="font-weight:700; margin-bottom:1rem;">Add-ons</h6>
+                    <div class="d-flex flex-column gap-2 mb-4" id="bs-addons">
+                        <!-- Dynamic add-ons -->
+                    </div>
                 </div>
                 
                 <div class="d-flex align-items-center gap-3 mt-4">
@@ -318,9 +363,22 @@ function openItemDetails(itemId, name, price, restId, restName, image, desc, isV
         });
         
         // Setup addons update price
-        document.querySelectorAll('.bs-addon-cb').forEach(cb => {
-            cb.addEventListener('change', updateBsPrice);
+        document.getElementById('bs-addons').addEventListener('change', (e) => {
+            if (e.target.classList.contains('bs-addon-cb')) {
+                updateBsPrice();
+            }
         });
+    }
+
+    // Populate addons
+    const addonsContainer = document.getElementById('bs-addons-container');
+    const addonsDiv = document.getElementById('bs-addons');
+    if (addonsHTML) {
+        addonsDiv.innerHTML = addonsHTML;
+        addonsContainer.style.display = 'block';
+    } else {
+        addonsDiv.innerHTML = '';
+        addonsContainer.style.display = 'none';
     }
 
     // Set data

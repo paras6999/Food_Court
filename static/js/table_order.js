@@ -32,20 +32,32 @@ function updateAuthUI() {
   const token = getToken();
   const role = getRole();
   const name = getName();
-  const loginBtn = document.getElementById('nav-login-btn');
-  const logoutBtn = document.getElementById('nav-logout-btn');
-  const userName = document.getElementById('nav-user-name');
+  
+  // New dropdown items
+  const navUserInfo = document.getElementById('nav-user-info');
+  const navLoginItem = document.getElementById('nav-login-item');
+  const navRegisterItem = document.getElementById('nav-register-item');
+  const navOrdersItem = document.getElementById('nav-orders-item');
+  const navLogoutItem = document.getElementById('nav-logout-item');
+  const navUserName = document.getElementById('nav-username');
 
   if (token && role === 'customer') {
-    if (loginBtn) loginBtn.style.display = 'none';
-    if (logoutBtn) logoutBtn.style.display = '';
-    if (userName) { userName.style.display = ''; userName.textContent = name; }
+    if (navUserInfo) navUserInfo.style.display = '';
+    if (navUserName) navUserName.textContent = name;
+    if (navLoginItem) navLoginItem.style.display = 'none';
+    if (navRegisterItem) navRegisterItem.style.display = 'none';
+    if (navOrdersItem) navOrdersItem.style.display = '';
+    if (navLogoutItem) navLogoutItem.style.display = '';
+    
     const promo = document.getElementById('guest-promo-banner');
     if (promo) promo.style.display = 'none';
   } else {
-    if (loginBtn) loginBtn.style.display = '';
-    if (logoutBtn) logoutBtn.style.display = 'none';
-    if (userName) userName.style.display = 'none';
+    if (navUserInfo) navUserInfo.style.display = 'none';
+    if (navLoginItem) navLoginItem.style.display = '';
+    if (navRegisterItem) navRegisterItem.style.display = '';
+    if (navOrdersItem) navOrdersItem.style.display = 'none';
+    if (navLogoutItem) navLogoutItem.style.display = 'none';
+    
     const promo = document.getElementById('guest-promo-banner');
     if (promo) promo.style.display = '';
   }
@@ -226,7 +238,7 @@ function renderMenu() {
         
         return `
     <div class="col-12 col-md-6" style="animation-delay:${idx * 0.05}s">
-      <div class="menu-card" style="cursor:pointer" onclick="openItemDetails('${item._id}', '${item.name.replace(/'/g, "\\'")}', ${item.price}, '${restaurantId}', '${item.restName}', '${item.image || ''}', '${item.description || ''}', ${item.isVeg})">
+      <div class="menu-card" style="cursor:pointer" onclick="openItemDetails('${item._id}', '${item.name.replace(/'/g, "\\'")}', ${item.price}, '${restaurantId}', '${item.restName}', '${item.image || ''}', '${item.description || ''}', ${item.isVeg}, '${item.addons || ''}')">
         <img src="${item.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200'}" alt="${item.name}"
              onerror="this.src='https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200'">
         <div class="details">
@@ -238,7 +250,7 @@ function renderMenu() {
         </div>
         <div class="ms-auto">
           <button class="btn-primary-custom" style="padding:0.45rem 1rem;font-size:0.85rem"
-            onclick="event.stopPropagation(); openItemDetails('${item._id}', '${item.name.replace(/'/g, "\\'")}', ${item.price}, '${restaurantId}', '${item.restName}', '${item.image || ''}', '${item.description || ''}', ${item.isVeg})">
+            onclick="event.stopPropagation(); openItemDetails('${item._id}', '${item.name.replace(/'/g, "\\'")}', ${item.price}, '${restaurantId}', '${item.restName}', '${item.image || ''}', '${item.description || ''}', ${item.isVeg}, '${item.addons || ''}')">
             <i class="bi bi-plus-lg"></i> Add
           </button>
         </div>

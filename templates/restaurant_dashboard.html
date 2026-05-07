@@ -17,26 +17,25 @@
 
 <body>
 
-    <nav class="navbar navbar-expand-lg">
+    <nav class="navbar navbar-expand-lg" style="border-bottom: 1px solid var(--border); background: var(--surface);">
         <div class="container-fluid px-4">
-            <a class="navbar-brand" href="/restaurant_dashboard.html">🧑‍🍳 Restaurant<span>Panel</span></a>
-            <div class="ms-auto d-flex align-items-center gap-3">
-                <span id="rest-name-nav" style="color:var(--text-muted);font-size:.9rem"></span>
-                <a href="/" class="btn-outline-custom" style="padding:.4rem 1rem;font-size:.85rem;text-decoration:none" target="_blank">
-                    <i class="bi bi-shop"></i> Customer View
-                </a>
-                <div class="theme-switch-wrapper">
-                    <label class="theme-switch" for="checkbox-theme-restaurant">
-                        <input type="checkbox" id="checkbox-theme-restaurant" />
-                        <div class="slider">
-                            <span class="slider-icon">☀️</span>
-                            <span class="slider-icon" style="padding-right:2px;">🌙</span>
-                        </div>
-                    </label>
+            <a class="navbar-brand" href="/restaurant_dashboard.html" style="font-weight: 700; font-size: 1.25rem;">Restaurant Panel</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarOptions" style="border: none;">
+                <i class="bi bi-list" style="font-size: 1.8rem; color: var(--text-primary);"></i>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarOptions">
+                <div class="ms-auto d-flex flex-column flex-lg-row align-items-lg-center gap-3 mt-3 mt-lg-0 pb-3 pb-lg-0">
+                    <span id="rest-name-nav" style="color:var(--text-muted);font-size:.9rem;font-weight:500;"></span>
+                    <a href="/" class="btn-outline-custom text-center" style="padding:.4rem 1rem;font-size:.85rem;text-decoration:none" target="_blank">
+                        <i class="bi bi-shop"></i> Customer View
+                    </a>
+                    <button class="btn btn-link p-0 text-decoration-none text-start text-lg-center" onclick="toggleProfessionalTheme()" id="theme-toggle-btn" style="color:var(--text-primary);">
+                        <i class="bi bi-moon-stars" style="font-size: 1.2rem;"></i> <span class="d-lg-none ms-2">Toggle Theme</span>
+                    </button>
+                    <button class="btn-primary-custom" onclick="logout()" style="padding:.4rem 1rem;font-size:.85rem">
+                        <i class="bi bi-box-arrow-right"></i> Logout
+                    </button>
                 </div>
-                <button class="btn-outline-custom" onclick="logout()" style="padding:.4rem 1rem;font-size:.85rem">
-                    <i class="bi bi-box-arrow-right"></i> Logout
-                </button>
             </div>
         </div>
     </nav>
@@ -138,10 +137,30 @@
                                         <button id="pie-mode-rev" class="btn btn-outline-custom" style="padding:.3rem .8rem;font-size:.82rem" onclick="setDishPieMode('revenue')">₹ By Revenue</button>
                                     </div>
                                 </div>
-                                <div style="position:relative;max-height:320px">
-                                    <canvas id="dishPieChart"></canvas>
+                                <div class="row align-items-center">
+                                    <div class="col-md-6 col-lg-5">
+                                        <div style="position:relative;max-height:280px;display:flex;justify-content:center;">
+                                            <canvas id="dishPieChart" style="max-height:260px;"></canvas>
+                                        </div>
+                                        <p class="text-center mt-2" style="color:var(--text-muted);font-size:0.8rem">Top 10 items shown individually</p>
+                                    </div>
+                                    <div class="col-md-6 col-lg-7">
+                                        <div class="table-responsive" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);">
+                                            <table class="fc-table table-sm mb-0">
+                                                <thead style="position:sticky;top:0;background:var(--surface);z-index:1;box-shadow:0 1px 0 var(--border);">
+                                                    <tr>
+                                                        <th style="padding:0.7rem 1rem;">Item Name</th>
+                                                        <th class="text-end" style="padding:0.7rem 1rem;">Qty Sold</th>
+                                                        <th class="text-end" style="padding:0.7rem 1rem;">Revenue</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="top-items-table-body">
+                                                    <tr><td colspan="3" class="text-center py-3 text-muted">Loading data...</td></tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
                                 </div>
-                                <p class="text-center mt-2" style="color:var(--text-muted);font-size:0.8rem">Top 10 items shown individually · remaining grouped as <em>Others</em></p>
                             </div>
                         </div>
                     </div>
@@ -362,6 +381,11 @@
                             <input type="file" class="fc-input" id="item-image" accept="image/*" style="padding:.5rem">
                         </div>
                         <div class="mb-3">
+                            <label class="fc-label">Add-ons (Optional)</label>
+                            <input type="text" class="fc-input" id="item-addons" placeholder="e.g. Extra Cheese:30, Double Patty:50">
+                            <small class="text-muted" style="font-size:0.75rem">Format: Name:Price separated by commas</small>
+                        </div>
+                        <div class="mb-3">
                             <label class="d-flex align-items-center gap-2" style="cursor:pointer">
                                 <input type="checkbox" id="item-available" checked
                                     style="width:18px;height:18px;accent-color:var(--primary)">
@@ -449,9 +473,52 @@
         </div>
     </div>
 
+    <!-- Table Bill Modal -->
+    <div class="modal fade" id="tableBillModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)">
+                <div class="modal-header" style="border-color:var(--border)">
+                    <h5 class="modal-title">Final Bill - Table <span id="bill-table-num"></span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="table-responsive">
+                        <table class="fc-table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Item</th>
+                                    <th>Qty</th>
+                                    <th class="text-end">Price</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-bill-items">
+                                <tr><td colspan="3" class="text-center text-muted">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <hr style="border-color:var(--border)">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Total Discount</span>
+                        <strong class="text-success" id="table-bill-discount">-₹0.00</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-3" style="font-size:1.2rem;font-weight:bold;color:var(--primary)">
+                        <span>Final Total</span>
+                        <span id="table-bill-total">₹0.00</span>
+                    </div>
+                </div>
+                <div class="modal-footer" style="border-color:var(--border)">
+                    <button class="btn-outline-custom" data-bs-dismiss="modal">Cancel</button>
+                    <button class="btn-primary-custom" id="table-bill-pay-btn">
+                        <i class="bi bi-check-circle"></i> Mark as Paid & Clear Table
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- AI Analyst Chat Panel -->
     <div id="ai-chat-panel" style="position:fixed; bottom:20px; right:20px; width:350px; max-height:500px; background:var(--surface); border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.2); border:1px solid var(--border); display:flex; flex-direction:column; z-index:1000; overflow:hidden; transform: translateY(120%); transition: transform 0.3s ease;">
-        <div style="background:var(--primary); padding:1rem; color:white; font-weight:bold; d-flex justify-content-between; display:flex; justify-content:space-between; align-items:center;">
+        <div style="background:var(--primary); padding:1rem; color:white; font-weight:bold; display:flex; justify-content:space-between; align-items:center;">
             <span><i class="bi bi-robot"></i> AI Analyst</span>
             <button class="btn-close btn-close-white" onclick="toggleAIChat()"></button>
         </div>
@@ -495,7 +562,7 @@
         function logout() { localStorage.clear(); window.location.href = '/restaurant_auth.html'; }
 
         function showSection(name) {
-            const sections = ['orders', 'assistance', 'menu', 'stats', 'reviews', 'offers', 'tables'];
+            const sections = ['orders', 'assistance', 'menu', 'tables', 'stats', 'reviews', 'offers'];
             sections.forEach(s => {
                 const el = document.getElementById('section-' + s);
                 if (el) el.style.display = s === name ? '' : 'none';

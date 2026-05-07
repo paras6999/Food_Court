@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import get_jwt_identity, get_jwt, jwt_required
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timedelta
 import hmac, hashlib, razorpay, requests, os, re
 from backend.db import restaurants_col, menu_col, orders_col, reviews_col, tables_col, group_carts_col, coupons_col, users_col
 from backend.utils.auth_helper import role_required
@@ -276,7 +276,7 @@ def place_order():
         "earned_points": earned_points,
         "address": address,
         "status": "pending",
-        "created_at": datetime.utcnow()
+        "created_at": datetime.utcnow() + timedelta(hours=5, minutes=30)
     }
 
     # Add mobile number if provided for WhatsApp bill
@@ -330,7 +330,7 @@ def join_group_cart():
             "created_by": user_id,
             "participants": [],
             "items": [],
-            "created_at": datetime.utcnow()
+            "created_at": datetime.utcnow() + timedelta(hours=5, minutes=30)
         }
         is_creator = True
     else:
@@ -341,7 +341,7 @@ def join_group_cart():
         group_cart["participants"].append({
             "user_id": user_id,
             "user_name": user_name,
-            "joined_at": datetime.utcnow()
+            "joined_at": datetime.utcnow() + timedelta(hours=5, minutes=30)
         })
         group_carts_col.replace_one(
             {"restaurant_id": rid, "table_number": table_number},
@@ -607,7 +607,7 @@ def place_group_order():
             "total_price": round(total, 2),
             "address": f"Dine-In — Table {table_number}",
             "status": "pending",
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.utcnow() + timedelta(hours=5, minutes=30),
             "table_number": table_number,
             "order_type": "dine-in",
             "is_group_order": True,
@@ -658,7 +658,7 @@ def service_request():
         "total_price": 0,
         "status": "pending",
         "address": "",
-        "created_at": datetime.utcnow()
+        "created_at": datetime.utcnow() + timedelta(hours=5, minutes=30)
     })
 
     return jsonify({"message": f"Service request ({request_type}) sent to restaurant"}), 201
@@ -742,7 +742,7 @@ def submit_review():
         "restaurant_id": rid,
         "rating": rating,
         "comment": comment,
-        "created_at": datetime.utcnow()
+        "created_at": datetime.utcnow() + timedelta(hours=5, minutes=30)
     }
     
     if oid:
@@ -847,7 +847,7 @@ def cancel_order(order_id):
 
     orders_col.update_one(
         {"_id": oid},
-        {"$set": {"status": "cancelled", "cancelled_at": datetime.utcnow()}}
+        {"$set": {"status": "cancelled", "cancelled_at": datetime.utcnow() + timedelta(hours=5, minutes=30)}}
     )
     return jsonify({"message": "Order cancelled successfully"}), 200
 
@@ -1152,7 +1152,7 @@ def verify_payment_and_place_order():
         "earned_points": earned_points,
         "address": address,
         "status": "pending",
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.utcnow() + timedelta(hours=5, minutes=30),
         "payment": {
             "razorpay_order_id": razorpay_order_id,
             "razorpay_payment_id": razorpay_payment_id,
