@@ -773,30 +773,28 @@ def submit_review():
 @customer_bp.route("/api/reviews/<restaurant_id>", methods=["GET"])
 def get_reviews(restaurant_id):
     try:
-        rid = ObjectId(restaurant_id)
-    except Exception:
-        rid = None
+        rid_str = str(restaurant_id).strip()
+        
+        # Try both string and ObjectId to be safe
+        query = {"restaurant_id": rid_str}
+        try:
+            rid_obj = ObjectId(rid_str)
+            query = {"$or": [{"restaurant_id": rid_obj}, {"restaurant_id": rid_str}]}
+        except:
+            pass
 
-    # Support both ObjectId and string ID to handle legacy/mismatched data
-    query_variants = []
-    if rid: 
-        query_variants.append({"restaurant_id": rid})
-        query_variants.append({"restaurant_id": str(rid)})
-    query_variants.append({"restaurant_id": restaurant_id.strip()})
-    
-    # Final fallback: case-insensitive string match
-    query_variants.append({"restaurant_id": {"$regex": f"^{re.escape(restaurant_id.strip())}$", "$options": "i"}})
-
-    reviews = list(reviews_col.find({"$or": query_variants}).sort("created_at", -1).limit(50))
-    
-    # Debug print for server logs
-    print(f"DEBUG: Review query for {restaurant_id} returned {len(reviews)} items.")
-    for rv in reviews:
-        rv["_id"] = str(rv["_id"])
-        rv["user_id"] = str(rv["user_id"])
-        rv["restaurant_id"] = str(rv["restaurant_id"])
-        rv["created_at"] = rv["created_at"].isoformat() if isinstance(rv.get("created_at"), datetime) else ""
-    return jsonify(reviews), 200
+        reviews = list(reviews_col.find(query).sort("created_at", -1).limit(30))
+        
+        for rv in reviews:
+            rv["_id"] = str(rv["_id"])
+            rv["user_id"] = str(rv.get("user_id", ""))
+            rv["restaurant_id"] = str(rv.get("restaurant_id", ""))
+            # Ensure date is always a string
+            rv["created_at"] = str(rv.get("created_at", ""))
+            
+        return jsonify(reviews), 200
+    except Exception as e:
+        return jsonify({"error": f"Internal Server Error: {str(e)}"}), 500
 
 
 # ── Global Search ───────────────────────────────────────────────────────────────
