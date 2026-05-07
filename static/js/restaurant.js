@@ -569,13 +569,17 @@ async function toggleItemAvailability(itemId, isAvailable) {
 
 // ── Reviews ─────────────────────────────────────────────
 async function loadReviews() {
-  const data = await apiFetch('/api/restaurant/dashboard', true); // fetch current restaurant id
-  if (data?.error || !data?.restaurant?._id) return;
-
-  const reviews = await apiFetch(`/api/reviews/${data.restaurant._id}`);
   const container = document.getElementById('reviews-container');
   if (!container) return;
 
+  const data = await apiFetch('/api/restaurant/dashboard', true); 
+  if (data?.error || !data?.restaurant?._id) {
+    container.innerHTML = '<div class="col-12 text-center text-danger">Failed to load restaurant profile.</div>';
+    return;
+  }
+
+  const reviews = await apiFetch(`/api/reviews/${data.restaurant._id}`);
+  
   if (!Array.isArray(reviews) || reviews.length === 0) {
     container.innerHTML = '<div class="col-12 text-center" style="color:var(--text-muted);padding:2rem">No reviews yet. Keep delivering great food!</div>';
     return;

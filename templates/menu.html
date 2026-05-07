@@ -326,8 +326,10 @@
         async function loadReviews() {
             const reviews = await apiFetch(`/api/reviews/${restId}`);
             const list = document.getElementById('reviews-list');
+            if (!list) return;
+
             if (!Array.isArray(reviews) || reviews.length === 0) {
-                list.innerHTML = '<p style="color:var(--text-muted)">No reviews yet. Be the first!</p>';
+                list.innerHTML = '<p style="color:var(--text-muted); text-align:center; padding:1rem;">No reviews yet. Be the first!</p>';
                 return;
             }
             list.innerHTML = reviews.map(r => `
@@ -336,7 +338,7 @@
           <strong>${r.user_name}</strong>
           <span class="stars">${'★'.repeat(Math.round(r.rating))}${'☆'.repeat(5 - Math.round(r.rating))}</span>
         </div>
-        ${r.comment ? `<p style="color:var(--text-muted);font-size:0.9rem;margin:0">${r.comment}</p>` : ''}
+        ${r.comment ? `<p style="color:var(--text-muted);font-size:0.9rem;margin:0">${r.comment}</p>` : '<p style="color:var(--text-muted);font-size:0.85rem;margin:0;font-style:italic">No comment left</p>'}
       </div>
     `).join('');
         }

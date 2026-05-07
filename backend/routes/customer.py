@@ -775,9 +775,12 @@ def get_reviews(restaurant_id):
     try:
         rid = ObjectId(restaurant_id)
     except Exception:
-        return jsonify({"error": "Invalid restaurant id"}), 400
+        rid = None
 
-    reviews = list(reviews_col.find({"restaurant_id": rid}).sort("created_at", -1).limit(20))
+    # Support both ObjectId and string ID to handle legacy/mismatched data
+    query = {"$or": [{"restaurant_id": rid}, {"restaurant_id": restaurant_id}]} if rid else {"restaurant_id": restaurant_id}
+    
+    reviews = list(reviews_col.find(query).sort("created_at", -1).limit(20))
     for rv in reviews:
         rv["_id"] = str(rv["_id"])
         rv["user_id"] = str(rv["user_id"])
